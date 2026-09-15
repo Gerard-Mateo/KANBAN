@@ -1,0 +1,1 @@
+ALTER TABLE public.pomodoro_sessions ADD COLUMN IF NOT EXISTS task_done boolean NOT NULL DEFAULT false;
