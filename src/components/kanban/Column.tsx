@@ -5,6 +5,7 @@ import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ColumnId, Task } from "@/lib/kanban-data";
 import { SortableTaskCard } from "./TaskCard";
+import { ColumnContextMenu, type ColumnMenuState } from "./ColumnContextMenu";
 
 const accent: Record<ColumnId, string> = {
   todo: "bg-todo",
@@ -21,18 +22,21 @@ export function Column({
   onTaskContextMenu,
   selectedIds,
   onTaskSelect,
+  onBulkCreate,
 }: {
   id: ColumnId;
   title: string;
   hint: string;
   tasks: Task[];
   onAdd: (title: string) => void;
+  onBulkCreate?: (() => void) | undefined;
   onTaskContextMenu?: ((task: Task, e: React.MouseEvent) => void) | undefined;
   selectedIds?: Set<string> | undefined;
   onTaskSelect?: ((task: Task, e: React.MouseEvent) => void) | undefined;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id, data: { type: "column" } });
   const [composing, setComposing] = useState(false);
+  const [menuPos, setMenuPos] = useState<ColumnMenuState>(null);
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -47,15 +51,18 @@ export function Column({
     setComposing(false);
   }
 
-  function openComposer(e: React.MouseEvent) {
+  function openContextMenu(e: React.MouseEvent) {
     // Ignore modifier-driven context menus (e.g. Ctrl/Cmd + click or Ctrl+A on macOS)
     if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    // Dentro del cuadro de texto se deja el menú nativo (pegar, etc.).
+    if ((e.target as HTMLElement).closest("textarea, input")) return;
     e.preventDefault();
-    setComposing(true);
+    if (onBulkCreate) setMenuPos({ x: e.clientX, y: e.clientY });
+    else setComposing(true);
   }
 
   return (
-    <section onContextMenu={openComposer} className="flex min-h-[60vh] flex-col">
+    <section onContextMenu={openContextMenu} className="flex min-h-[60vh] flex-col">
       <header className="mb-3 flex items-center gap-2 px-1">
         <span className={cn("size-2 rounded-full", accent[id])} />
         <h2 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h2>
@@ -143,6 +150,12 @@ export function Column({
           </button>
         )}
       </div>
+      <ColumnContextMenu
+        state={menuPos}
+        onClose={() => setMenuPos(null)}
+        onNewTask={() => setComposing(true)}
+        onBulkCreate={() => onBulkCreate?.()}
+      />
     </section>
   );
 }

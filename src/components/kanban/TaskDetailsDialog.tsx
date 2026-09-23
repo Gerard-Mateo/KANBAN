@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CalendarClock, Hash, Layers, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useBackdropClose } from "@/hooks/use-backdrop-close";
 import { COLUMNS, TYPE_LABELS, type ColumnId, type TagTone, type Task } from "@/lib/kanban-data";
 
 const TYPES: TagTone[] = ["video", "guion", "module", "other"];
@@ -40,6 +41,8 @@ export function TaskDetailsDialog({
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
 
+  const backdrop = useBackdropClose(onClose);
+
   if (!task) return null;
 
   const created = task.createdAt
@@ -51,8 +54,10 @@ export function TaskDetailsDialog({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-sm"
-      onClick={onClose}
+      {...backdrop}
     >
       <div
         onClick={(e) => e.stopPropagation()}

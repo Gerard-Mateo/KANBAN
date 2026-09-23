@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useBackdropClose } from "@/hooks/use-backdrop-close";
 import type { Task } from "@/lib/kanban-data";
 
 function words(title: string): string[] {
@@ -56,12 +57,16 @@ export function CloneRenameDialog({
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
 
+  const backdrop = useBackdropClose(onClose);
+
   if (!open) return null;
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4"
-      onClick={onClose}
+      {...backdrop}
     >
       <div
         onClick={(e) => e.stopPropagation()}

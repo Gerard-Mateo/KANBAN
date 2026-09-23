@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Copy, Info, PencilLine, Plus, Timer, Trash2, X } from "lucide-react";
+import { Copy, Info, Pencil, PencilLine, Plus, Timer, Trash2, X } from "lucide-react";
 
 export type MenuState = { x: number; y: number; taskId: string } | null;
 
@@ -13,6 +13,7 @@ export function TaskContextMenu({
   selectedCount = 0,
   onClone,
   onCloneRename,
+  onRename,
   onClearSelection,
 }: {
   state: MenuState;
@@ -24,6 +25,7 @@ export function TaskContextMenu({
   selectedCount?: number;
   onClone?: () => void;
   onCloneRename?: () => void;
+  onRename?: () => void;
   onClearSelection?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -53,6 +55,16 @@ export function TaskContextMenu({
       : []),
     { label: "Ver detalles", icon: Info, action: onDetails, danger: false },
     { label: "Nueva tarea debajo", icon: Plus, action: onAddBelow, danger: false },
+    ...(multi && onRename
+      ? [
+          {
+            label: "Renombrar seleccionadas…",
+            icon: Pencil,
+            action: onRename,
+            danger: false,
+          },
+        ]
+      : []),
     ...(multi && onClone
       ? [
           {

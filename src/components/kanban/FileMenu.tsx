@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, FileSpreadsheet, FileText, History, Upload, FolderOpen } from "lucide-react";
+import { useBackdropClose } from "@/hooks/use-backdrop-close";
 import type { BoardState } from "@/lib/kanban-data";
 import {
   exportCsv,
@@ -21,6 +22,10 @@ export function FileMenu({
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const closePendingModal = useBackdropClose(() => {
+    setPending(null);
+    setError(null);
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -118,11 +123,10 @@ export function FileMenu({
 
       {(pending || error) && (
         <div
+          role="dialog"
+          aria-modal="true"
           className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4"
-          onClick={() => {
-            setPending(null);
-            setError(null);
-          }}
+          {...closePendingModal}
         >
           <div
             onClick={(e) => e.stopPropagation()}

@@ -75,13 +75,24 @@ function download(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-const stamp = () => new Date().toISOString().slice(0, 10);
+// Fecha y hora locales en el nombre del archivo (no solo la fecha), para que
+// exportar varias veces el mismo día no vaya sobrescribiendo el anterior.
+export const stamp = () => {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+};
+
+export const xlsxFileName = () => `tareas-${stamp()}.xlsx`;
 
 export function exportCsv(board: BoardState) {
   const rows = boardRows(board);
   const sheet = XLSX.utils.json_to_sheet(rows);
   const csv = XLSX.utils.sheet_to_csv(sheet);
-  download(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }), `tareas-${stamp()}.csv`);
+  download(
+    new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }),
+    `tareas-${stamp()}.csv`,
+  );
 }
 
 export function exportHistoryCsv(board: BoardState) {
@@ -96,7 +107,12 @@ export function exportHistoryCsv(board: BoardState) {
   );
 }
 
-export function exportXlsx(board: BoardState) {
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/** Arma el libro de Excel (hojas "Tareas" + "Movimientos") como bytes crudos,
+ * sin disparar ninguna descarga -- lo reutilizan tanto exportXlsx (descarga
+ * del navegador) como el guardado directo a una carpeta local. */
+export function buildXlsxBuffer(board: BoardState): ArrayBuffer {
   const rows = boardRows(board);
   const sheet = XLSX.utils.json_to_sheet(rows);
   sheet["!cols"] = [{ wch: 14 }, { wch: 70 }, { wch: 12 }, { wch: 24 }, { wch: 20 }];
@@ -110,13 +126,12 @@ export function exportXlsx(board: BoardState) {
   moveSheet["!cols"] = [{ wch: 70 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, moveSheet, "Movimientos");
 
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-  download(
-    new Blob([out], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    }),
-    `tareas-${stamp()}.xlsx`,
-  );
+  return XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+}
+
+export function exportXlsx(board: BoardState) {
+  const out = buildXlsxBuffer(board);
+  download(new Blob([out], { type: XLSX_MIME }), xlsxFileName());
 }
 
 /* ------------------------------- Importación ------------------------------ */
@@ -201,8 +216,7 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: "array", cellDates: true });
 
-  const taskSheetName =
-    wb.SheetNames.find((n) => norm(n) === "tareas") ?? wb.SheetNames[0];
+  const taskSheetName = wb.SheetNames.find((n) => norm(n) === "tareas") ?? wb.SheetNames[0];
   if (!taskSheetName) throw new Error("El archivo no tiene hojas de datos.");
   const taskRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[taskSheetName]!, {
     defval: "",
