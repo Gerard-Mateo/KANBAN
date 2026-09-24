@@ -34,6 +34,7 @@ import { FileMenu } from "./FileMenu";
 import { CloneRenameDialog, replaceWord } from "./CloneRenameDialog";
 import { BulkRenameDialog, applyRename, type RenameMode } from "./BulkRenameDialog";
 import { BulkCreateDialog } from "./BulkCreateDialog";
+import { BulkDetailsDialog } from "./BulkDetailsDialog";
 import {
   DEFAULT_SHORTCUT,
   ShortcutSetting,
@@ -83,6 +84,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
   const [cloneOpen, setCloneOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [bulkCreateCol, setBulkCreateCol] = useState<ColumnId | null>(null);
+  const [bulkDetailsOpen, setBulkDetailsOpen] = useState(false);
   const [tab, setTab] = useState<"board" | "pomodoro" | "okr">("board");
   const [pomodoroTask, setPomodoroTask] = useState<string | undefined>(undefined);
   const [typeahead, setTypeahead] = useState("");
@@ -544,6 +546,48 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     return id;
   }
 
+  // Detalles en grupo: tipo y estado de todas las tareas seleccionadas a la vez.
+  function bulkSetType(type: TagTone | undefined) {
+    setBoard((prev) => {
+      const next = { ...prev } as BoardState;
+      for (const c of COLUMNS) {
+        next[c.id] = prev[c.id].map((t) => {
+          if (!selected.has(t.id)) return t;
+          const updated: Task = { ...t };
+          delete updated.type;
+          return type ? { ...updated, type } : updated;
+        });
+      }
+      return next;
+    });
+  }
+
+  function bulkMove(to: ColumnId) {
+    const moving = selectedTasks.filter((s) => s.col !== to);
+    if (moving.length === 0) return;
+    captureFlip(moving.map((m) => m.task.id));
+    const ids = new Set(moving.map((m) => m.task.id));
+    setBoard((prev) => {
+      const next = { ...prev } as BoardState;
+      const moved: Task[] = [];
+      for (const c of COLUMNS) {
+        if (c.id === to) continue;
+        next[c.id] = prev[c.id].filter((t) => {
+          if (!ids.has(t.id)) return true;
+          moved.push(logMove(t, c.id, to));
+          return false;
+        });
+      }
+      next[to] = [...prev[to], ...moved];
+      return next;
+    });
+  }
+
+  function handleDetailsFromMenu(taskId: string) {
+    if (selected.size > 1 && selected.has(taskId)) setBulkDetailsOpen(true);
+    else setDetailsId(taskId);
+  }
+
   // Crea varias tareas de golpe en una columna, todas con el mismo tipo (si se eligió).
   function handleAddMany(col: ColumnId, titles: string[], type: TagTone | undefined) {
     const now = Date.now();
@@ -894,6 +938,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
                   tasks={filteredBoard[col.id]}
                   onAdd={(title) => handleAddTask(col.id, title)}
                   onBulkCreate={() => setBulkCreateCol(col.id)}
+                  onCreateWithDetails={() => setDetailsId(handleAddTask(col.id, ""))}
                   selectedIds={selected}
                   onTaskSelect={handleTaskSelect}
                   onTaskContextMenu={handleTaskContextMenu}
@@ -959,7 +1004,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         onRename={() => setRenameOpen(true)}
         onClearSelection={() => setSelected(new Set())}
         onAddBelow={() => menu && handleAddBelow(menu.taskId)}
-        onDetails={() => menu && setDetailsId(menu.taskId)}
+        onDetails={() => menu && handleDetailsFromMenu(menu.taskId)}
         onPomodoro={() => menu && void startPomodoro(menu.taskId)}
       />
 
@@ -973,6 +1018,17 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         column={bulkCreateCol}
         onClose={() => setBulkCreateCol(null)}
         onConfirm={handleAddMany}
+      />
+
+      <BulkDetailsDialog
+        items={bulkDetailsOpen ? selectedTasks : []}
+        onClose={() => setBulkDetailsOpen(false)}
+        onSetType={bulkSetType}
+        onMove={bulkMove}
+        onRename={() => {
+          setBulkDetailsOpen(false);
+          setRenameOpen(true);
+        }}
       />
 
       <BulkRenameDialog

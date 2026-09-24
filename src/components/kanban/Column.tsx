@@ -23,6 +23,7 @@ export function Column({
   selectedIds,
   onTaskSelect,
   onBulkCreate,
+  onCreateWithDetails,
 }: {
   id: ColumnId;
   title: string;
@@ -30,6 +31,7 @@ export function Column({
   tasks: Task[];
   onAdd: (title: string) => void;
   onBulkCreate?: (() => void) | undefined;
+  onCreateWithDetails?: (() => void) | undefined;
   onTaskContextMenu?: ((task: Task, e: React.MouseEvent) => void) | undefined;
   selectedIds?: Set<string> | undefined;
   onTaskSelect?: ((task: Task, e: React.MouseEvent) => void) | undefined;
@@ -153,7 +155,7 @@ export function Column({
       <ColumnContextMenu
         state={menuPos}
         onClose={() => setMenuPos(null)}
-        onNewTask={() => setComposing(true)}
+        onNewTask={() => (onCreateWithDetails ? onCreateWithDetails() : setComposing(true))}
         onBulkCreate={() => onBulkCreate?.()}
       />
     </section>

@@ -56,7 +56,7 @@ export function TaskDetailsDialog({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 grid place-items-center bg-foreground/30 p-4"
       {...backdrop}
     >
       <div
