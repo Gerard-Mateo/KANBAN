@@ -39,6 +39,16 @@ muchas tareas a la vez y trabajar con ellas en bloque, sin pelearme con la inter
 
 - Objetivos con key results en formato SMART, progreso y tareas enlazadas al tablero.
 
+**Stats**
+
+- Tareas: calendario de actividad del año, vasos de jugo por tipo (el vaso es el
+  total, el jugo lo hecho y la espuma lo que está en progreso), velocidad hasta
+  Hecho y ritmo semanal.
+- Pomodoro: torre de tomates de los últimos días, rachas, a qué hora y qué día te
+  enfocas más, y en qué tipo de tarea se va tu tiempo.
+- OKRs y SMART: anillos de avance por objetivo, si cada KR va a tiempo frente a su
+  fecha límite y qué letras SMART le faltan a cada uno.
+
 **Guardar y exportar**
 
 - Guardado automático en la nube (Supabase).

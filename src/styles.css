@@ -273,3 +273,56 @@
     }
   }
 }
+
+/* ---- Vasos de jugo (Stats: completadas por tipo) ---- */
+@layer components {
+  .juice-level {
+    transition:
+      height 1400ms cubic-bezier(0.22, 1, 0.36, 1),
+      bottom 1400ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .juice-wave {
+    animation: juice-wave 2.4s linear infinite;
+  }
+  .juice-bubble {
+    opacity: 0;
+    animation: juice-bubble 2.7s ease-in infinite;
+  }
+  @keyframes juice-wave {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @keyframes juice-bubble {
+    0% {
+      transform: translateY(0) scale(0.6);
+      opacity: 0;
+    }
+    15% {
+      opacity: 0.9;
+    }
+    100% {
+      transform: translateY(-160px) scale(1.1);
+      opacity: 0;
+    }
+  }
+
+  /* Anillos de OKR: el arco se dibuja al entrar. */
+  .okr-ring-arc {
+    transition: stroke-dashoffset 1200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .juice-level,
+    .okr-ring-arc {
+      transition: none;
+    }
+    .juice-wave,
+    .juice-bubble {
+      animation: none;
+    }
+  }
+}

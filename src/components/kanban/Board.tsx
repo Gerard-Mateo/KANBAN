@@ -912,6 +912,14 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     setSelected(new Set());
   }
 
+  // Cada pestaña abre desde arriba: si venías bajando por un tablero largo, la
+  // siguiente pestaña no debe aparecer ya desplazada hasta su final.
+  function changeTab(next: typeof tab) {
+    if (next === tab) return;
+    setTab(next);
+    window.scrollTo({ top: 0 });
+  }
+
   const tabLabels = {
     board: "Tablero",
     pomodoro: "Pomodoro",
@@ -944,7 +952,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
                 <button
                   key={t}
                   type="button"
-                  onClick={() => setTab(t)}
+                  onClick={() => changeTab(t)}
                   className={
                     "rounded-md px-3 py-1.5 text-xs font-medium transition-colors " +
                     (tab === t
@@ -1149,12 +1157,13 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
           />
         </div>
 
-        <div
-          className={tab === "stats" ? undefined : "hidden"}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <StatsPage board={board} />
-        </div>
+        {/* Stats se monta solo al abrirla: así recarga pomodoros y OKRs cada vez y
+        las gráficas no se calculan (ni se miden a 0 px) mientras está oculta. */}
+        {tab === "stats" && (
+          <div onClick={(e) => e.stopPropagation()}>
+            <StatsPage board={board} />
+          </div>
+        )}
       </main>
 
       <TaskContextMenu

@@ -9,6 +9,8 @@ export type TypeStat = {
   label: string;
   total: number;
   done: number;
+  /** En "En Progreso" ahora mismo. */
+  doing: number;
   /** 0-100; 0 cuando el tipo no tiene tareas. */
   pct: number;
 };
@@ -66,7 +68,7 @@ export type BoardStats = {
   untimed: number;
 };
 
-const typeOf = (task: Task) => {
+export const typeOf = (task: Task) => {
   const tag = tagsForTask(task)[0];
   return { id: tag?.tone ?? "other", label: tag?.label ?? "General" };
 };
@@ -104,9 +106,10 @@ export function computeStats(board: BoardState, weeksBack = 8): BoardStats {
     for (const task of board[col.id]) {
       total += 1;
       const { id, label } = typeOf(task);
-      const entry = types.get(id) ?? { id, label, total: 0, done: 0, pct: 0 };
+      const entry = types.get(id) ?? { id, label, total: 0, done: 0, doing: 0, pct: 0 };
       entry.total += 1;
       if (col.id === "done") entry.done += 1;
+      if (col.id === "doing") entry.doing += 1;
       types.set(id, entry);
     }
   }

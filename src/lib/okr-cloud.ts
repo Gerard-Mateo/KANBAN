@@ -25,6 +25,8 @@ export type KeyResult = {
   targetValue: number;
   dueDate: string | null;
   position: number;
+  /** Momento de creación (ms); es el arranque del plazo del KR. */
+  createdAt: number;
   tasks: KrTask[];
 };
 
@@ -53,13 +55,16 @@ export function taskProgress(kr: KeyResult): number | null {
   return Math.round((done / kr.tasks.length) * 100);
 }
 
+/** Avance combinado del KR: métrica y mini-tareas a partes iguales (0-100). */
+export function krProgress(kr: KeyResult): number {
+  const tp = taskProgress(kr);
+  const mp = metricProgress(kr);
+  return tp === null ? mp : Math.round((mp + tp) / 2);
+}
+
 export function objectiveProgress(obj: Objective): number {
   if (obj.keyResults.length === 0) return 0;
-  const sum = obj.keyResults.reduce((acc, kr) => {
-    const tp = taskProgress(kr);
-    const mp = metricProgress(kr);
-    return acc + (tp === null ? mp : Math.round((mp + tp) / 2));
-  }, 0);
+  const sum = obj.keyResults.reduce((acc, kr) => acc + krProgress(kr), 0);
   return Math.round(sum / obj.keyResults.length);
 }
 
@@ -97,6 +102,7 @@ export async function loadOkrs(): Promise<Objective[]> {
     targetValue: Number(r.target_value ?? 100),
     dueDate: r.due_date ?? null,
     position: r.position ?? 0,
+    createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
     tasks: tasks.filter((t) => t.keyResultId === r.id),
   }));
 
