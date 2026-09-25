@@ -6,9 +6,9 @@ import { cn } from "@/lib/utils";
 import { tagsForTask, type Task } from "@/lib/kanban-data";
 import { typeChipStyle, useCustomTypes } from "@/lib/custom-types";
 
+// Solo los tipos neutros llevan clase fija; el resto (incluidos Video y Guion)
+// se pinta con su propio tono para que cada tipo se distinga.
 const toneClass: Record<string, string> = {
-  video: "bg-primary/10 text-primary",
-  guion: "bg-accent/10 text-accent",
   module: "bg-secondary text-muted-foreground",
   other: "bg-secondary text-muted-foreground",
 };
@@ -27,10 +27,10 @@ export function TaskCardBody({
     <div
       className={cn(
         "group relative flex cursor-default select-none gap-2 rounded-lg border border-border bg-card p-3",
-        "shadow-[0_1px_2px_oklch(0_0_0_/_0.04)] transition-[box-shadow,border-color] duration-150",
-        !dragging && "hover:shadow-[0_2px_8px_oklch(0_0_0_/_0.08)]",
+        "shadow-[0_1px_2px_oklch(0_0_0_/_0.5)] transition-[box-shadow,border-color] duration-150",
+        !dragging && "hover:shadow-[0_2px_10px_oklch(0_0_0_/_0.6)]",
         selected && "border-primary bg-primary/[0.04]",
-        dragging && "border-primary shadow-[0_8px_24px_oklch(0_0_0_/_0.14)]",
+        dragging && "border-primary shadow-[0_8px_28px_oklch(0_0_0_/_0.75)]",
       )}
     >
       {selected && (

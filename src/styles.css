@@ -69,41 +69,43 @@
 :root {
   --radius: 0.625rem;
 
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.16 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.16 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0 0);
-  --primary: oklch(0.48 0.19 264);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.96 0 0);
-  --secondary-foreground: oklch(0.24 0 0);
-  --muted: oklch(0.965 0 0);
-  --muted-foreground: oklch(0.48 0 0);
-  --accent: oklch(0.48 0.19 264);
-  --accent-foreground: oklch(0.99 0 0);
-  --destructive: oklch(0.55 0.2 26);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.9 0 0);
-  --input: oklch(0.88 0 0);
-  --ring: oklch(0.48 0.19 264);
-  --todo: oklch(0.62 0.16 45);
-  --doing: oklch(0.48 0.19 264);
-  --done: oklch(0.55 0.14 155);
-  --chart-1: oklch(0.48 0.19 264);
-  --chart-2: oklch(0.62 0.16 45);
-  --chart-3: oklch(0.55 0.14 155);
-  --chart-4: oklch(0.55 0.2 26);
-  --chart-5: oklch(0.55 0 0);
-  --sidebar: oklch(0.98 0 0);
-  --sidebar-foreground: oklch(0.16 0 0);
-  --sidebar-primary: oklch(0.48 0.19 264);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.96 0 0);
-  --sidebar-accent-foreground: oklch(0.16 0 0);
-  --sidebar-border: oklch(0.9 0 0);
-  --sidebar-ring: oklch(0.48 0.19 264);
+  /* Paleta TRON: Ares -- negro de rejilla con neón rojo-naranja (Ares) y
+     cian (la Grid clásica) como acento secundario. */
+  --background: oklch(0.15 0.012 264);
+  --foreground: oklch(0.95 0.008 80);
+  --card: oklch(0.19 0.014 264);
+  --card-foreground: oklch(0.95 0.008 80);
+  --popover: oklch(0.2 0.014 264);
+  --popover-foreground: oklch(0.95 0.008 80);
+  --primary: oklch(0.63 0.21 32);
+  --primary-foreground: oklch(0.14 0.01 264);
+  --secondary: oklch(0.25 0.016 264);
+  --secondary-foreground: oklch(0.95 0.008 80);
+  --muted: oklch(0.25 0.016 264);
+  --muted-foreground: oklch(0.68 0.015 264);
+  --accent: oklch(0.63 0.21 32);
+  --accent-foreground: oklch(0.14 0.01 264);
+  --destructive: oklch(0.62 0.23 18);
+  --destructive-foreground: oklch(0.14 0.01 264);
+  --border: oklch(0.3 0.02 264);
+  --input: oklch(0.34 0.022 264);
+  --ring: oklch(0.63 0.21 32);
+  --todo: oklch(0.7 0.18 55);
+  --doing: oklch(0.68 0.14 220);
+  --done: oklch(0.7 0.16 165);
+  --chart-1: oklch(0.63 0.21 32);
+  --chart-2: oklch(0.62 0.12 220);
+  --chart-3: oklch(0.65 0.14 165);
+  --chart-4: oklch(0.65 0.15 85);
+  --chart-5: oklch(0.6 0.17 330);
+  --sidebar: oklch(0.17 0.013 264);
+  --sidebar-foreground: oklch(0.95 0.008 80);
+  --sidebar-primary: oklch(0.63 0.21 32);
+  --sidebar-primary-foreground: oklch(0.14 0.01 264);
+  --sidebar-accent: oklch(0.25 0.016 264);
+  --sidebar-accent-foreground: oklch(0.95 0.008 80);
+  --sidebar-border: oklch(0.3 0.02 264);
+  --sidebar-ring: oklch(0.63 0.21 32);
 }
 
 .dark {
@@ -159,12 +161,12 @@
   background: var(--card);
   border: 1px solid var(--border);
   box-shadow:
-    0 1px 2px oklch(0 0 0 / 0.04),
-    0 12px 24px -12px oklch(0 0 0 / 0.14);
+    0 1px 2px oklch(0 0 0 / 0.5),
+    0 12px 28px -12px oklch(0 0 0 / 0.7);
 }
 
 @utility retro-shadow {
-  box-shadow: 0 1px 2px oklch(0 0 0 / 0.06);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.5);
 }
 
 @utility card-lift {

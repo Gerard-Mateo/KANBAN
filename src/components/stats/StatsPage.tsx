@@ -20,24 +20,29 @@ import {
 import { Table2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { computeStats, formatDays, type BoardStats } from "@/lib/task-stats";
+import { ActivityCalendar } from "./ActivityCalendar";
 import type { BoardState } from "@/lib/kanban-data";
 
 // Slots categóricos en orden fijo (nunca ciclados): azul, naranja, aqua,
 // amarillo, magenta, verde, violeta, rojo.
+// Slots categóricos TRON (orden fijo, nunca ciclado), validados contra el
+// fondo oscuro: rojo Ares, cian de la Grid, ámbar, magenta, violeta, verde,
+// azul y oliva.
 const SERIES = [
-  "#2a78d6",
-  "#eb6834",
-  "#1baf7a",
-  "#eda100",
-  "#e87ba4",
-  "#008300",
-  "#4a3aa7",
-  "#e34948",
+  "#f0513a",
+  "#0e97bb",
+  "#c48400",
+  "#d1489a",
+  "#8b7ae8",
+  "#00a377",
+  "#5b7fd4",
+  "#7f9422",
 ];
-const TOTAL_COLOR = "#2a78d6";
-const DONE_COLOR = "#1baf7a";
-const AXIS = "oklch(0.48 0 0)";
-const GRID = "oklch(0.9 0 0)";
+const TOTAL_COLOR = "#0e97bb";
+const DONE_COLOR = "#f0513a";
+const AXIS = "oklch(0.68 0.015 264)";
+const GRID = "oklch(0.3 0.02 264)";
+const CURSOR_FILL = "oklch(0.25 0.016 264)";
 
 const seriesColor = (i: number) => SERIES[i % SERIES.length]!;
 
@@ -111,11 +116,13 @@ function Empty({ children }: { children: React.ReactNode }) {
 const tooltipStyle = {
   contentStyle: {
     borderRadius: 8,
-    border: "1px solid oklch(0.9 0 0)",
+    border: "1px solid oklch(0.3 0.02 264)",
+    background: "oklch(0.2 0.014 264)",
     fontSize: 12,
-    boxShadow: "0 4px 16px oklch(0 0 0 / 0.1)",
+    boxShadow: "0 4px 20px oklch(0 0 0 / 0.6)",
   },
-  labelStyle: { fontWeight: 600, color: "oklch(0.16 0 0)" },
+  labelStyle: { fontWeight: 600, color: "oklch(0.95 0.008 80)" },
+  itemStyle: { color: "oklch(0.95 0.008 80)" },
 };
 
 function StatTile({
@@ -233,6 +240,13 @@ export function StatsPage({ board }: { board: BoardState }) {
         />
       </div>
 
+      <Panel
+        title="Actividad del año"
+        hint="Un cuadro por día. Cuanto más fuerte el tono, más tareas pusiste en progreso o completaste ese día."
+      >
+        <ActivityCalendar calendar={stats.calendar} />
+      </Panel>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel
           title="Completadas por tipo"
@@ -275,7 +289,7 @@ export function StatsPage({ board }: { board: BoardState }) {
                     stroke={TOTAL_COLOR}
                     strokeWidth={2}
                     fill={TOTAL_COLOR}
-                    fillOpacity={0.12}
+                    fillOpacity={0.14}
                   />
                   <Radar
                     name="Hechas"
@@ -283,7 +297,8 @@ export function StatsPage({ board }: { board: BoardState }) {
                     stroke={DONE_COLOR}
                     strokeWidth={2}
                     fill={DONE_COLOR}
-                    fillOpacity={0.3}
+                    fillOpacity={0.55}
+                    dot={{ r: 3, fill: DONE_COLOR, strokeWidth: 0 }}
                   />
                   <Tooltip
                     {...tooltipStyle}
@@ -333,7 +348,7 @@ export function StatsPage({ board }: { board: BoardState }) {
                 />
                 <Tooltip
                   {...tooltipStyle}
-                  cursor={{ fill: "oklch(0.96 0 0)" }}
+                  cursor={{ fill: CURSOR_FILL }}
                   formatter={(_v: number, _n: string, item: { payload?: SpeedRow }) => [
                     item.payload ? formatDays(item.payload.median) : "—",
                     "Mediana",
@@ -439,7 +454,7 @@ export function StatsPage({ board }: { board: BoardState }) {
               />
               <Tooltip
                 {...tooltipStyle}
-                cursor={{ fill: "oklch(0.96 0 0)" }}
+                cursor={{ fill: CURSOR_FILL }}
                 formatter={(value: number) => [`${value} tarea(s)`, "Completadas"]}
                 labelFormatter={(l: string) => `Semana del ${l}`}
               />

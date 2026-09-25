@@ -78,8 +78,12 @@ const hashHue = (label: string) => {
   return HUES[h % HUES.length]!;
 };
 
+// Los tipos incluidos también tienen su tono fijo: rojo Ares para Video y
+// cian de la Grid para Guion, para que no se confundan entre sí.
+const BUILTIN_HUES: Record<string, number> = { video: 32, guion: 220 };
+
 export const hueFor = (label: string, list: CustomType[]) =>
-  list.find((c) => c.label === label)?.hue ?? hashHue(label);
+  list.find((c) => c.label === label)?.hue ?? BUILTIN_HUES[label] ?? hashHue(label);
 
 export function addCustomType(
   rawLabel: string,
@@ -146,7 +150,11 @@ export function removeCustomType(label: string) {
 
 export function typeChipStyle(label: string, list: CustomType[]): CSSProperties {
   const h = hueFor(label, list);
-  return { backgroundColor: `oklch(0.94 0.05 ${h})`, color: `oklch(0.4 0.14 ${h})` };
+  // Pastilla oscura con texto de neón, para que brille sobre la rejilla negra.
+  return {
+    backgroundColor: `oklch(0.28 0.07 ${h})`,
+    color: `oklch(0.82 0.17 ${h})`,
+  };
 }
 
 export const typeDotColor = (label: string, list: CustomType[]) =>
