@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { ListPlus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBackdropClose } from "@/hooks/use-backdrop-close";
-import { COLUMN_TITLES, TYPE_LABELS, type ColumnId, type TagTone } from "@/lib/kanban-data";
-
-const TYPES: TagTone[] = ["video", "guion", "module", "other"];
+import { useAllTypes } from "@/lib/custom-types";
+import { COLUMN_TITLES, type ColumnId, type TagTone } from "@/lib/kanban-data";
+import { TypeCreator, TypeDot } from "./TypeCreator";
 
 const inputClass =
   "mt-1 w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-primary";
@@ -23,6 +23,7 @@ export function BulkCreateDialog({
   const [suffix, setSuffix] = useState("");
   const [lines, setLines] = useState("");
   const [type, setType] = useState<TagTone | null>(null);
+  const types = useAllTypes();
 
   useEffect(() => {
     if (column) {
@@ -145,21 +146,23 @@ export function BulkCreateDialog({
           >
             Automático
           </button>
-          {TYPES.map((t) => (
+          {types.map((t) => (
             <button
-              key={t}
+              key={t.id}
               type="button"
-              onClick={() => setType(t)}
+              onClick={() => setType(t.id)}
               className={cn(
-                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                type === t
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                type === t.id
                   ? "border-primary bg-primary text-primary-foreground"
                   : "border-border text-muted-foreground hover:text-foreground",
               )}
             >
-              {TYPE_LABELS[t]}
+              {t.custom && <TypeDot label={t.label} />}
+              {t.label}
             </button>
           ))}
+          <TypeCreator onCreated={(label) => setType(label)} />
         </div>
 
         <div className="mt-4 max-h-40 min-h-10 overflow-y-auto rounded-md border border-border bg-secondary/50 p-2">

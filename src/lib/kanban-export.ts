@@ -3,6 +3,7 @@ import {
   COLUMNS,
   COLUMN_TITLES,
   TYPE_LABELS,
+  typeLabel,
   tagsForTask,
   type BoardState,
   type ColumnId,
@@ -10,6 +11,7 @@ import {
   type TagTone,
   type Task,
 } from "./kanban-data";
+import { getCustomTypes, hueFromValue, hueName } from "./custom-types";
 
 type Row = {
   Estado: string;
@@ -53,7 +55,7 @@ export function boardRows(board: BoardState): Row[] {
       rows.push({
         Estado: col.title,
         Tarea: task.title,
-        Tipo: task.type ? TYPE_LABELS[task.type] : "—",
+        Tipo: task.type ? typeLabel(task.type) : "—",
         Etiquetas: tagsForTask(task)
           .map((t) => t.label)
           .join(", "),
@@ -126,6 +128,16 @@ export function buildXlsxBuffer(board: BoardState): ArrayBuffer {
   moveSheet["!cols"] = [{ wch: 70 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, moveSheet, "Movimientos");
 
+  // Tipos personalizados con su color, para recuperarlos al importar.
+  const customTypes = getCustomTypes();
+  if (customTypes.length) {
+    const typeSheet = XLSX.utils.json_to_sheet(
+      customTypes.map((c) => ({ Tipo: c.label, Color: hueName(c.hue) })),
+    );
+    typeSheet["!cols"] = [{ wch: 26 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, typeSheet, "Tipos");
+  }
+
   return XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
 }
 
@@ -157,7 +169,8 @@ function typeFromLabel(value: unknown): TagTone | undefined {
   if (!n || n === "—" || n === "-") return undefined;
   for (const [tone, label] of Object.entries(TYPE_LABELS))
     if (norm(label) === n) return tone as TagTone;
-  return undefined;
+  // Etiqueta desconocida = tipo personalizado (así un export se puede volver a importar).
+  return String(value).trim();
 }
 
 /** Fechas exportadas con toLocaleString("es-EC"): d/m/yyyy, h:mm:ss a. m. */
@@ -191,7 +204,13 @@ function parseLocalDate(value: unknown): number | undefined {
   return Number.isNaN(t) ? undefined : t;
 }
 
-export type ImportResult = { board: BoardState; taskCount: number; moveCount: number };
+export type ImportedType = { label: string; hue: number };
+export type ImportResult = {
+  board: BoardState;
+  taskCount: number;
+  moveCount: number;
+  types: ImportedType[];
+};
 
 function historyByTitle(rows: Record<string, unknown>[]): Map<string, MoveEvent[]> {
   const map = new Map<string, MoveEvent[]>();
@@ -228,6 +247,19 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
     : [];
   const histories = historyByTitle(moveRowsRaw);
 
+  const typesSheetName = wb.SheetNames.find((n) => norm(n) === "tipos");
+  const types: ImportedType[] = [];
+  if (typesSheetName) {
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[typesSheetName]!, {
+      defval: "",
+    });
+    for (const row of rows) {
+      const label = String(row["Tipo"] ?? "").trim();
+      const hue = hueFromValue(row["Color"]);
+      if (label && hue !== undefined) types.push({ label, hue });
+    }
+  }
+
   const board: BoardState = { todo: [], doing: [], done: [] };
   let taskCount = 0;
   let moveCount = 0;
@@ -256,5 +288,5 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
       'No se encontraron tareas válidas. El archivo debe tener columnas "Estado" y "Tarea".',
     );
 
-  return { board, taskCount, moveCount };
+  return { board, taskCount, moveCount, types };
 }

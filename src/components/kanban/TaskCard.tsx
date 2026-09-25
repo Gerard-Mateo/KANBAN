@@ -4,6 +4,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Check, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { tagsForTask, type Task } from "@/lib/kanban-data";
+import { typeChipStyle, useCustomTypes } from "@/lib/custom-types";
 
 const toneClass: Record<string, string> = {
   video: "bg-primary/10 text-primary",
@@ -21,6 +22,7 @@ export function TaskCardBody({
   dragging?: boolean;
   selected?: boolean;
 }) {
+  const customTypes = useCustomTypes();
   return (
     <div
       className={cn(
@@ -47,6 +49,7 @@ export function TaskCardBody({
                 "rounded-md px-1.5 py-0.5 text-[10px] font-medium",
                 toneClass[tag.tone],
               )}
+              style={toneClass[tag.tone] ? undefined : typeChipStyle(tag.tone, customTypes)}
             >
               {tag.label}
             </span>

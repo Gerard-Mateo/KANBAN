@@ -1,7 +1,9 @@
 import { Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCustomTypes } from "@/lib/custom-types";
+import type { TagTone } from "@/lib/kanban-data";
 
-export type TagTone = "video" | "guion" | "module" | "other";
+export type { TagTone };
 
 export const FILTER_OPTIONS: { tone: TagTone; label: string }[] = [
   { tone: "video", label: "Video" },
@@ -28,6 +30,8 @@ export function FilterBar({
   totalCount: number;
 }) {
   const active = query.trim().length > 0 || tones.size > 0;
+  const custom = useCustomTypes();
+  const options = [...FILTER_OPTIONS, ...custom.map((c) => ({ tone: c.label, label: c.label }))];
 
   return (
     <div className="glass-panel mb-6 flex flex-col gap-3 rounded-2xl p-3 sm:flex-row sm:items-center">
@@ -53,7 +57,7 @@ export function FilterBar({
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        {FILTER_OPTIONS.map((opt) => {
+        {options.map((opt) => {
           const selected = tones.has(opt.tone);
           return (
             <button

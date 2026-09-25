@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { CalendarClock, Hash, Layers, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBackdropClose } from "@/hooks/use-backdrop-close";
-import { COLUMNS, TYPE_LABELS, type ColumnId, type TagTone, type Task } from "@/lib/kanban-data";
-
-const TYPES: TagTone[] = ["video", "guion", "module", "other"];
+import { useAllTypes } from "@/lib/custom-types";
+import { COLUMNS, type ColumnId, type Task } from "@/lib/kanban-data";
+import { TypeCreator, TypeDot } from "./TypeCreator";
 
 export function TaskDetailsDialog({
   task,
@@ -42,6 +42,7 @@ export function TaskDetailsDialog({
   }, [onClose]);
 
   const backdrop = useBackdropClose(onClose);
+  const types = useAllTypes();
 
   if (!task) return null;
 
@@ -100,21 +101,23 @@ export function TaskDetailsDialog({
           Tipo de tarea
         </label>
         <div className="mb-4 flex flex-wrap gap-2">
-          {TYPES.map((t) => (
+          {types.map((t) => (
             <button
-              key={t}
+              key={t.id}
               type="button"
-              onClick={() => onSave({ type: task.type === t ? undefined : t })}
+              onClick={() => onSave({ type: task.type === t.id ? undefined : t.id })}
               className={cn(
-                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                task.type === t
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                task.type === t.id
                   ? "border-accent bg-accent text-accent-foreground"
                   : "border-border/70 text-muted-foreground hover:border-accent/50 hover:text-foreground",
               )}
             >
-              {TYPE_LABELS[t]}
+              {t.custom && <TypeDot label={t.label} />}
+              {t.label}
             </button>
           ))}
+          <TypeCreator onCreated={(label) => onSave({ type: label })} />
         </div>
 
         <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">

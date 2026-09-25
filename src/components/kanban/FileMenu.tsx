@@ -8,6 +8,7 @@ import {
   exportXlsx,
   parseBoardFile,
   type ImportResult,
+  type ImportedType,
 } from "@/lib/kanban-export";
 
 export function FileMenu({
@@ -15,7 +16,7 @@ export function FileMenu({
   onImport,
 }: {
   board: BoardState;
-  onImport: (board: BoardState) => void;
+  onImport: (board: BoardState, types: ImportedType[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<{ result: ImportResult; name: string } | null>(null);
@@ -168,7 +169,7 @@ export function FileMenu({
                     <button
                       type="button"
                       onClick={() => {
-                        onImport(pending.result.board);
+                        onImport(pending.result.board, pending.result.types);
                         setPending(null);
                       }}
                       className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"

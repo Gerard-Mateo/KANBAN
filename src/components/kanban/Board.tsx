@@ -44,6 +44,7 @@ import {
 } from "./ShortcutSetting";
 import { loadBoard, saveBoard } from "@/lib/tasks-cloud";
 import { saveBoardVersion } from "@/lib/local-save";
+import { ensureCustomType, upsertCustomType, useCustomTypes } from "@/lib/custom-types";
 import { supabase } from "@/integrations/supabase/client";
 import { PomodoroPage } from "@/components/pomodoro/PomodoroPage";
 import { OkrPage } from "@/components/okr/OkrPage";
@@ -53,7 +54,12 @@ const SHORTCUT_KEY = "kanban-ctrl-a-new-task";
 const SHORTCUT_COMBO_KEY = "kanban-new-task-combo";
 const FLIP_DURATION_MS = 220;
 
-type Marquee = { x0: number; y0: number; x1: number; y1: number };
+// El ancla se guarda en coordenadas de página (incluye el scroll) para que el
+// rectángulo siga apuntando al mismo sitio mientras la página se desplaza sola.
+type Marquee = { pageX0: number; pageY0: number; x1: number; y1: number };
+
+const EDGE = 60; // px desde el borde donde empieza el auto-scroll
+const MAX_SCROLL_SPEED = 18; // px por frame
 
 function logMove(task: Task, from: ColumnId | null, to: ColumnId): Task {
   return { ...task, history: [...(task.history ?? []), { at: Date.now(), from, to }] };
@@ -62,6 +68,14 @@ function logMove(task: Task, from: ColumnId | null, to: ColumnId): Task {
 function findColumn(board: BoardState, id: string): ColumnId | undefined {
   if (id in board) return id as ColumnId;
   return COLUMNS.find((c) => board[c.id].some((t) => t.id === id))?.id;
+}
+
+/** ¿El bloque seleccionado ya está junto y cubriendo esa posición? (no hay nada que mover) */
+function isBlockContiguousAt(list: Task[], movingIds: Set<string>, overIndex: number) {
+  const indexes = list.map((t, i) => (movingIds.has(t.id) ? i : -1)).filter((i) => i >= 0);
+  const first = indexes[0] ?? -1;
+  const last = indexes[indexes.length - 1] ?? -1;
+  return last - first + 1 === indexes.length && overIndex >= first && overIndex <= last;
 }
 
 function rectsOverlap(a: { left: number; right: number; top: number; bottom: number }, b: DOMRect) {
@@ -228,6 +242,42 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
   const boardRef = useRef<BoardState>(board);
   boardRef.current = board;
 
+  // Tipos personalizados: al borrar uno se quita de las tareas y del filtro; los tipos
+  // que ya traen las tareas (nube / importación) se registran para poder elegirlos.
+  const customTypes = useCustomTypes();
+  const prevCustomTypes = useRef(customTypes);
+  useEffect(() => {
+    const gone = new Set(
+      prevCustomTypes.current
+        .filter((p) => !customTypes.some((c) => c.label === p.label))
+        .map((p) => p.label),
+    );
+    prevCustomTypes.current = customTypes;
+    if (gone.size === 0) return;
+    setTones((prev) => new Set([...prev].filter((t) => !gone.has(t))));
+    setBoard((prev) => {
+      const next = { ...prev } as BoardState;
+      for (const c of COLUMNS) {
+        next[c.id] = prev[c.id].map((t) => {
+          if (!t.type || !gone.has(t.type)) return t;
+          const updated: Task = { ...t };
+          delete updated.type;
+          return updated;
+        });
+      }
+      return next;
+    });
+  }, [customTypes]);
+
+  function registerBoardTypes(b: BoardState) {
+    for (const c of COLUMNS) for (const t of b[c.id]) if (t.type) ensureCustomType(t.type);
+  }
+
+  useEffect(() => {
+    if (loaded) registerBoardTypes(boardRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
   // Guardar (Ctrl+G): escribe la versión actual como .xlsx en una carpeta
   // local elegida una sola vez, en vez de disparar una descarga cada vez.
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -319,13 +369,20 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const marqueeBase = useRef<Set<string>>(new Set());
 
-  const updateMarqueeSelection = useCallback((box: Marquee) => {
-    const rect = {
-      left: Math.min(box.x0, box.x1),
-      right: Math.max(box.x0, box.x1),
-      top: Math.min(box.y0, box.y1),
-      bottom: Math.max(box.y0, box.y1),
+  const marqueeRect = (box: Marquee) => {
+    // El ancla vuelve a coordenadas de viewport para comparar con getBoundingClientRect.
+    const y0 = box.pageY0 - window.scrollY;
+    const x0 = box.pageX0 - window.scrollX;
+    return {
+      left: Math.min(x0, box.x1),
+      right: Math.max(x0, box.x1),
+      top: Math.min(y0, box.y1),
+      bottom: Math.max(y0, box.y1),
     };
+  };
+
+  const updateMarqueeSelection = useCallback((box: Marquee) => {
+    const rect = marqueeRect(box);
     const hit = new Set(marqueeBase.current);
     document.querySelectorAll<HTMLElement>("[data-task-id]").forEach((el) => {
       if (rectsOverlap(rect, el.getBoundingClientRect())) {
@@ -339,18 +396,53 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
   const hasMarquee = marquee !== null;
   useEffect(() => {
     if (!marquee) return;
-    function onMove(e: MouseEvent) {
-      const next = { x0: marquee!.x0, y0: marquee!.y0, x1: e.clientX, y1: e.clientY };
+    // Último punto del cursor: lo usa tanto el mousemove como el auto-scroll,
+    // que sigue seleccionando aunque el ratón esté quieto en el borde.
+    const pointer = { x: marquee.x1, y: marquee.y1 };
+    let frame = 0;
+
+    const apply = () => {
+      const next = {
+        pageX0: marquee!.pageX0,
+        pageY0: marquee!.pageY0,
+        x1: pointer.x,
+        y1: pointer.y,
+      };
       setMarquee(next);
       updateMarqueeSelection(next);
+    };
+
+    function onMove(e: MouseEvent) {
+      pointer.x = e.clientX;
+      pointer.y = e.clientY;
+      apply();
     }
     function onUp() {
       suppressNextClear.current = true;
       setMarquee(null);
     }
+
+    // Auto-scroll al arrastrar cerca del borde superior/inferior, como en un
+    // explorador de archivos: la página sigue mientras tú sigues seleccionando.
+    const tick = () => {
+      const top = pointer.y - EDGE;
+      const bottom = pointer.y - (window.innerHeight - EDGE);
+      let dy = 0;
+      if (top < 0) dy = Math.max(-1, top / EDGE) * MAX_SCROLL_SPEED;
+      else if (bottom > 0) dy = Math.min(1, bottom / EDGE) * MAX_SCROLL_SPEED;
+      if (dy !== 0) {
+        const before = window.scrollY;
+        window.scrollBy(0, dy);
+        if (window.scrollY !== before) apply();
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
@@ -369,7 +461,12 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
       return;
     e.preventDefault();
     marqueeBase.current = e.ctrlKey || e.metaKey ? new Set(selected) : new Set();
-    const start = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
+    const start = {
+      pageX0: e.clientX + window.scrollX,
+      pageY0: e.clientY + window.scrollY,
+      x1: e.clientX,
+      y1: e.clientY,
+    };
     setMarquee(start);
     updateMarqueeSelection(start);
   }
@@ -527,10 +624,40 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
       moveToColumn(activeId, to, String(over.id));
       return;
     }
-    const oldIndex = board[from].findIndex((t) => t.id === activeId);
-    const newIndex = board[to].findIndex((t) => t.id === over.id);
-    if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
-    setBoard((prev) => ({ ...prev, [from]: arrayMove(prev[from], oldIndex, newIndex) }));
+    reorderWithinColumn(from, activeId, String(over.id));
+  }
+
+  // Reordenar dentro de la misma columna. Con varias tareas seleccionadas se
+  // mueve el grupo entero como un bloque, no solo la tarjeta bajo el cursor.
+  function reorderWithinColumn(col: ColumnId, activeId: string, overId: string) {
+    const list = board[col];
+    const activeIndex = list.findIndex((t) => t.id === activeId);
+    const overIndex = list.findIndex((t) => t.id === overId);
+    if (activeIndex === -1 || overIndex === -1) return;
+
+    const group = selected.has(activeId) && selected.size > 1;
+    if (!group) {
+      if (activeIndex === overIndex) return;
+      setBoard((prev) => ({ ...prev, [col]: arrayMove(prev[col], activeIndex, overIndex) }));
+      return;
+    }
+
+    const movingIds = new Set(list.filter((t) => selected.has(t.id)).map((t) => t.id));
+    if (movingIds.has(overId) && isBlockContiguousAt(list, movingIds, overIndex)) return;
+
+    captureFlip([...movingIds].filter((id) => id !== activeId));
+    setBoard((prev) => {
+      const cur = prev[col];
+      const moving = cur.filter((t) => movingIds.has(t.id));
+      const rest = cur.filter((t) => !movingIds.has(t.id));
+      const curOverIndex = cur.findIndex((t) => t.id === overId);
+      // Cuántas tarjetas que no se mueven quedan por encima del punto de destino.
+      let at = cur.slice(0, curOverIndex).filter((t) => !movingIds.has(t.id)).length;
+      // Soltando por debajo del bloque: el grupo va después de la tarjeta destino.
+      if (!movingIds.has(overId) && activeIndex < curOverIndex) at += 1;
+      rest.splice(at, 0, ...moving);
+      return { ...prev, [col]: rest };
+    });
   }
 
   function handleAddTask(col: ColumnId, title: string) {
@@ -872,7 +999,9 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
               </button>
               <FileMenu
                 board={board}
-                onImport={(next) => {
+                onImport={(next, types) => {
+                  for (const t of types) upsertCustomType(t.label, t.hue);
+                  registerBoardTypes(next);
                   setBoard(next);
                   setSelected(new Set());
                   setDetailsId(null);
@@ -949,16 +1078,37 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
             {/* No drop animation: the card should disappear from the overlay the
             instant it's released instead of easing into the slot. */}
             <DragOverlay dropAnimation={null} style={{ willChange: "transform" }}>
-              {activeTask ? (
-                <div className="w-[320px] cursor-grabbing">
-                  <TaskCardBody task={activeTask} dragging />
-                  {selected.size > 1 && selected.has(activeTask.id) && (
-                    <div className="mt-1 inline-flex items-center rounded-full bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground shadow-sm">
-                      +{selected.size - 1} más
-                    </div>
-                  )}
-                </div>
-              ) : null}
+              {activeTask
+                ? (() => {
+                    const groupSize =
+                      selected.has(activeTask.id) && selected.size > 1 ? selected.size : 1;
+                    // Las demás tarjetas del grupo viajan apiladas debajo de la de arriba.
+                    const layers = Math.min(groupSize - 1, 3);
+                    return (
+                      <div className="relative w-[320px] cursor-grabbing">
+                        {Array.from({ length: layers }, (_, i) => layers - i).map((depth) => (
+                          <div
+                            key={depth}
+                            aria-hidden
+                            className="absolute inset-0 rounded-lg border border-primary/40 bg-card shadow-sm"
+                            style={{
+                              transform: `translate(${depth * 4}px, ${depth * 4}px) rotate(${depth * 0.6}deg)`,
+                              opacity: 1 - depth * 0.18,
+                            }}
+                          />
+                        ))}
+                        <div className="relative">
+                          <TaskCardBody task={activeTask} dragging />
+                        </div>
+                        {groupSize > 1 && (
+                          <div className="absolute -top-2 -left-2 z-10 grid size-6 place-items-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground shadow-sm">
+                            {groupSize}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()
+                : null}
             </DragOverlay>
           </DndContext>
 
@@ -966,10 +1116,10 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
             <div
               className="pointer-events-none fixed z-40 rounded-sm border border-primary/50 bg-primary/10"
               style={{
-                left: Math.min(marquee.x0, marquee.x1),
-                top: Math.min(marquee.y0, marquee.y1),
-                width: Math.abs(marquee.x1 - marquee.x0),
-                height: Math.abs(marquee.y1 - marquee.y0),
+                left: marqueeRect(marquee).left,
+                top: marqueeRect(marquee).top,
+                width: marqueeRect(marquee).right - marqueeRect(marquee).left,
+                height: marqueeRect(marquee).bottom - marqueeRect(marquee).top,
               }}
             />
           )}

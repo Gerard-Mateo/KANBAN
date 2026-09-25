@@ -14,14 +14,23 @@ export type Task = {
   history?: MoveEvent[] | undefined;
 };
 
-export type TagTone = "video" | "guion" | "module" | "other";
+export type BuiltinTone = "video" | "guion" | "module" | "other";
 
-export const TYPE_LABELS: Record<TagTone, string> = {
+// Un tipo personalizado se guarda como su propia etiqueta (p. ej. "Reunión"),
+// así sigue mostrándose bien aunque falte la lista de tipos del navegador.
+export type TagTone = string;
+
+export const BUILTIN_TONES: BuiltinTone[] = ["video", "guion", "module", "other"];
+
+export const TYPE_LABELS: Record<string, string> = {
   video: "Video",
   guion: "Guion",
   module: "Módulo",
   other: "General",
 };
+
+export const isBuiltinTone = (t: string) => Object.hasOwn(TYPE_LABELS, t);
+export const typeLabel = (t: string) => (isBuiltinTone(t) ? TYPE_LABELS[t]! : t);
 
 export type BoardState = Record<ColumnId, Task[]>;
 
@@ -120,7 +129,7 @@ export function tagsFor(title: string): Tag[] {
 export function tagsForTask(task: Task): Tag[] {
   if (task.type) {
     const auto = tagsFor(task.title).filter((t) => t.tone === "module");
-    return [{ label: TYPE_LABELS[task.type], tone: task.type }, ...auto];
+    return [{ label: typeLabel(task.type), tone: task.type }, ...auto];
   }
   return tagsFor(task.title);
 }

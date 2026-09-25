@@ -2,17 +2,16 @@ import { useEffect } from "react";
 import { Pencil, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBackdropClose } from "@/hooks/use-backdrop-close";
+import { useAllTypes } from "@/lib/custom-types";
 import {
   COLUMNS,
   COLUMN_TITLES,
-  TYPE_LABELS,
   tagsForTask,
   type ColumnId,
   type TagTone,
   type Task,
 } from "@/lib/kanban-data";
-
-const TYPES: TagTone[] = ["video", "guion", "module", "other"];
+import { TypeCreator, TypeDot } from "./TypeCreator";
 
 type Item = { task: Task; col: ColumnId };
 
@@ -41,6 +40,7 @@ export function BulkDetailsDialog({
   onRename: () => void;
 }) {
   const open = items.length > 0;
+  const types = useAllTypes();
 
   useEffect(() => {
     if (!open) return;
@@ -89,20 +89,22 @@ export function BulkDetailsDialog({
           Tipo de tarea
         </p>
         <div className="mb-4 flex flex-wrap gap-2">
-          {TYPES.map((t) => {
-            const count = typeCount(t);
+          {types.map((t) => {
+            const count = typeCount(t.id);
             return (
               <button
-                key={t}
+                key={t.id}
                 type="button"
-                onClick={() => onSetType(count === n ? undefined : t)}
+                onClick={() => onSetType(count === n ? undefined : t.id)}
                 className={chipClass(count === n, count > 0 && count < n)}
               >
-                {TYPE_LABELS[t]}
+                {t.custom && <TypeDot label={t.label} />}
+                {t.label}
                 {count > 0 && count < n && <span className="opacity-70">{count}</span>}
               </button>
             );
           })}
+          <TypeCreator onCreated={(label) => onSetType(label)} />
         </div>
 
         <p className="mb-1.5 text-xs font-medium tracking-wider text-muted-foreground uppercase">
