@@ -48,6 +48,7 @@ import { ensureCustomType, upsertCustomType, useCustomTypes } from "@/lib/custom
 import { supabase } from "@/integrations/supabase/client";
 import { PomodoroPage } from "@/components/pomodoro/PomodoroPage";
 import { OkrPage } from "@/components/okr/OkrPage";
+import { StatsPage } from "@/components/stats/StatsPage";
 
 const STORAGE_KEY = "kanban-board-v1";
 const SHORTCUT_KEY = "kanban-ctrl-a-new-task";
@@ -99,7 +100,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
   const [renameOpen, setRenameOpen] = useState(false);
   const [bulkCreateCol, setBulkCreateCol] = useState<ColumnId | null>(null);
   const [bulkDetailsOpen, setBulkDetailsOpen] = useState(false);
-  const [tab, setTab] = useState<"board" | "pomodoro" | "okr">("board");
+  const [tab, setTab] = useState<"board" | "pomodoro" | "okr" | "stats">("board");
   const [pomodoroTask, setPomodoroTask] = useState<string | undefined>(undefined);
   const [typeahead, setTypeahead] = useState("");
   const typeaheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -911,7 +912,12 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     setSelected(new Set());
   }
 
-  const tabLabels = { board: "Tablero", pomodoro: "Pomodoro", okr: "OKRs" } as const;
+  const tabLabels = {
+    board: "Tablero",
+    pomodoro: "Pomodoro",
+    okr: "OKRs",
+    stats: "Stats",
+  } as const;
 
   return (
     <div
@@ -934,7 +940,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
               className="flex items-center gap-0.5 rounded-lg bg-secondary p-0.5"
               onClick={(e) => e.stopPropagation()}
             >
-              {(["board", "pomodoro", "okr"] as const).map((t) => (
+              {(["board", "pomodoro", "okr", "stats"] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -1036,7 +1042,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
       </header>
 
       <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6">
-        <div className={tab === "pomodoro" ? "hidden" : undefined}>
+        <div className={tab === "board" ? undefined : "hidden"}>
           <FilterBar
             query={query}
             onQuery={setQuery}
@@ -1141,6 +1147,13 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
             onStartPomodoro={(title) => startPomodoroByTitle(title)}
             onCompleteBoardTask={(title) => completeBoardTaskByTitle(title)}
           />
+        </div>
+
+        <div
+          className={tab === "stats" ? undefined : "hidden"}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <StatsPage board={board} />
         </div>
       </main>
 
