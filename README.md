@@ -38,6 +38,12 @@ muchas tareas a la vez y trabajar con ellas en bloque, sin pelearme con la inter
 **OKRs**
 
 - Objetivos con key results en formato SMART, progreso y tareas enlazadas al tablero.
+- **Arma tus OKRs con IA**, sin IA propia ni claves: copias un prompt (con tu
+  contexto, tus OKRs actuales y tus tareas pendientes), lo pegas en ChatGPT,
+  Claude o Gemini, y pegas su respuesta o subes el `.md`. Se importa en un clic:
+  añade o reemplaza tus OKRs, vincula las tareas que ya están en el tablero y crea
+  las nuevas en Por Hacer. El formato es el de `Plantilla .md`, y `Exportar .md`
+  escribe tus OKRs en ese mismo formato.
 
 **Stats**
 

@@ -875,6 +875,17 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     setRenameOpen(false);
   }
 
+  // Lo que la IA ve del tablero al armar OKRs: solo lo pendiente, con su tipo.
+  const pendingTasks = useMemo(
+    () =>
+      (["doing", "todo"] as const).flatMap((col) =>
+        board[col]
+          .filter((t) => t.title.trim())
+          .map((t) => ({ title: t.title, column: col, type: tagsForTask(t)[0]?.label ?? "" })),
+      ),
+    [board],
+  );
+
   const boardTitles = useMemo(
     () => COLUMNS.flatMap((c) => board[c.id].map((t) => t.title)).filter(Boolean),
     [board],
@@ -1153,6 +1164,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         <div className={tab === "okr" ? undefined : "hidden"} onClick={(e) => e.stopPropagation()}>
           <OkrPage
             boardTitles={boardTitles}
+            boardTasks={pendingTasks}
             onCreateBoardTask={(title) => handleAddTask("todo", title)}
             onStartPomodoro={(title) => startPomodoroByTitle(title)}
             onCompleteBoardTask={(title) => completeBoardTaskByTitle(title)}

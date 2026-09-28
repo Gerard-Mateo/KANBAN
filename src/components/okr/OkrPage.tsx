@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Pencil, Plus, Target, Timer, Trash2, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  FileDown,
+  Pencil,
+  Plus,
+  Sparkles,
+  Target,
+  Timer,
+  Trash2,
+  X,
+} from "lucide-react";
 import {
   createKeyResult,
   createKrTask,
@@ -11,11 +22,20 @@ import {
   objectiveProgress,
   setKrTaskDone,
   taskProgress,
+  getOkrs,
+  replaceOkrs,
   updateKeyResult,
   useOkrs,
   type KeyResult,
   type KeyResultInput,
+  type Objective,
 } from "@/lib/okrs";
+import { okrsToMarkdown, type PromptBoardTask } from "@/lib/okr-markdown";
+import { stamp } from "@/lib/kanban-export";
+import { OkrAiDialog, type ImportMode } from "./OkrAiDialog";
+
+/** Para reconocer la misma tarea/KR aunque cambien espacios, saltos o mayúsculas. */
+const sameText = (v: string) => v.replace(/\s+/g, " ").trim().toLowerCase();
 
 const emptyKr: KeyResultInput = {
   title: "",
@@ -76,11 +96,14 @@ function Bar({ value, tone }: { value: number; tone: "accent" | "done" }) {
 
 export function OkrPage({
   boardTitles,
+  boardTasks,
   onCreateBoardTask,
   onStartPomodoro,
   onCompleteBoardTask,
 }: {
   boardTitles: string[];
+  /** Tareas pendientes del tablero, para dárselas de contexto a la IA. */
+  boardTasks: PromptBoardTask[];
   onCreateBoardTask: (title: string) => void;
   onStartPomodoro: (title: string) => void;
   onCompleteBoardTask: (title: string) => void;
@@ -89,6 +112,63 @@ export function OkrPage({
   const [error, setError] = useState<string | null>(null);
   const [newObj, setNewObj] = useState({ title: "", description: "", period: "" });
   const [krFormFor, setKrFormFor] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // Importa lo que escribió la IA: vincula las tareas que ya existen en el
+  // tablero (aunque cambien espacios o mayúsculas), crea las nuevas pendientes
+  // y, al reemplazar, conserva la fecha de arranque de los KRs que siguen.
+  function importOkrs(imported: Objective[], mode: ImportMode, createBoardTasks: boolean) {
+    const board = new Map(boardTitles.map((t) => [sameText(t), t]));
+    const previous = new Map(
+      getOkrs().flatMap((o) => o.keyResults.map((k) => [sameText(k.title), k.createdAt] as const)),
+    );
+    let created = 0;
+    const linked = imported.map((o) => ({
+      ...o,
+      keyResults: o.keyResults.map((k) => ({
+        ...k,
+        createdAt: (mode === "replace" && previous.get(sameText(k.title))) || k.createdAt,
+        tasks: k.tasks.map((t) => {
+          const existing = board.get(sameText(t.title));
+          if (existing) return { ...t, title: existing, boardTaskTitle: existing };
+          if (createBoardTasks && !t.done) {
+            onCreateBoardTask(t.title);
+            board.set(sameText(t.title), t.title);
+            created += 1;
+          }
+          return t;
+        }),
+      })),
+    }));
+    void run(async () => {
+      replaceOkrs(mode === "replace" ? linked : [...getOkrs(), ...linked]);
+      const krs = linked.reduce((n, o) => n + o.keyResults.length, 0);
+      setNotice(
+        `Importados ${linked.length} objetivo(s) y ${krs} KR` +
+          (created ? `; ${created} tarea(s) nuevas en Por Hacer.` : "."),
+      );
+    });
+  }
+
+  function exportMarkdown() {
+    const url = URL.createObjectURL(
+      new Blob([okrsToMarkdown(objectives)], { type: "text/markdown;charset=utf-8" }),
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `okrs-${stamp()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
 
   const run = useCallback(async (fn: () => Promise<void>) => {
     try {
@@ -124,6 +204,23 @@ export function OkrPage({
             {total} objetivo(s) · avance global {globalProgress}%
           </span>
           {error && <span className="text-xs font-bold text-destructive">⚠︎ {error}</span>}
+          {notice && !error && <span className="text-xs font-bold text-done">✓ {notice}</span>}
+          <div className="ml-auto flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={btn}
+              onClick={exportMarkdown}
+              disabled={total === 0}
+              title="Descarga tus OKRs en el mismo .md que entiende la IA"
+            >
+              <FileDown className="mr-1 inline size-3" />
+              Exportar .md
+            </button>
+            <button type="button" className={btnPrimary} onClick={() => setAiOpen(true)}>
+              <Sparkles className="mr-1 inline size-3" />
+              Arma tus OKRs con IA
+            </button>
+          </div>
         </div>
         <div className="mt-3">
           <Bar value={globalProgress} tone="accent" />
@@ -241,9 +338,25 @@ export function OkrPage({
 
       {objectives.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          Aún no hay objetivos. Crea el primero arriba y luego añádele resultados clave SMART.
+          Aún no hay objetivos. Crea el primero arriba, o pulsa{" "}
+          <button
+            type="button"
+            className="font-bold text-primary hover:underline"
+            onClick={() => setAiOpen(true)}
+          >
+            Arma tus OKRs con IA
+          </button>{" "}
+          y tenlos listos en un minuto.
         </p>
       )}
+
+      <OkrAiDialog
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        current={objectives}
+        boardTasks={boardTasks}
+        onImport={importOkrs}
+      />
     </div>
   );
 }
