@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Copy, FileDown, Sparkles, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBackdropClose } from "@/hooks/use-backdrop-close";
+import { useAllTypes } from "@/lib/custom-types";
 import type { Objective } from "@/lib/okrs";
 import {
   OKR_MD_TEMPLATE,
@@ -84,6 +85,7 @@ export function OkrAiDialog({
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const backdrop = useBackdropClose(onClose);
+  const allTypes = useAllTypes();
 
   const refining = withCurrent && current.length > 0;
   // Si la IA recibió los OKRs actuales, devuelve el conjunto completo: por defecto reemplaza.
@@ -102,11 +104,15 @@ export function OkrAiDialog({
         goals,
         current: refining ? current : [],
         boardTasks: withBoard ? boardTasks : [],
+        types: allTypes.map((t) => t.label),
       }),
-    [goals, refining, current, withBoard, boardTasks],
+    [goals, refining, current, withBoard, boardTasks, allTypes],
   );
 
-  const parsed = useMemo(() => (answer.trim() ? parseOkrMarkdown(answer) : null), [answer]);
+  const parsed = useMemo(
+    () => (answer.trim() ? parseOkrMarkdown(answer, allTypes) : null),
+    [answer, allTypes],
+  );
 
   if (!open) return null;
 

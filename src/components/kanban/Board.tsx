@@ -45,7 +45,7 @@ import {
 import { loadBoard, saveBoard } from "@/lib/tasks-cloud";
 import { saveBoardVersion } from "@/lib/local-save";
 import { ensureCustomType, upsertCustomType, useCustomTypes } from "@/lib/custom-types";
-import { replaceOkrs } from "@/lib/okrs";
+import { replaceOkrs, sameText, syncKrTasksWithBoard } from "@/lib/okrs";
 import { supabase } from "@/integrations/supabase/client";
 import { PomodoroPage } from "@/components/pomodoro/PomodoroPage";
 import { OkrPage } from "@/components/okr/OkrPage";
@@ -662,14 +662,20 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     });
   }
 
-  function handleAddTask(col: ColumnId, title: string) {
+  function handleAddTask(col: ColumnId, title: string, type?: TagTone) {
     const id = `${col[0]}${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const now = Date.now();
     setBoard((prev) => ({
       ...prev,
       [col]: [
         ...prev[col],
-        { id, title, createdAt: now, history: [{ at: now, from: null, to: col }] },
+        {
+          id,
+          title,
+          createdAt: now,
+          ...(type ? { type } : {}),
+          history: [{ at: now, from: null, to: col }],
+        },
       ],
     }));
     return id;
@@ -875,43 +881,82 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     setRenameOpen(false);
   }
 
-  // Lo que la IA ve del tablero al armar OKRs: solo lo pendiente, con su tipo.
-  const pendingTasks = useMemo(
+  // Las tarjetas tal como las ven los OKRs: las mini-tareas son tarjetas normales.
+  // Su tipo es el elegido a mano o, si no, el que se deduce del título (Video/Guion).
+  const okrCards = useMemo(
     () =>
-      (["doing", "todo"] as const).flatMap((col) =>
-        board[col]
+      COLUMNS.flatMap((c) =>
+        board[c.id]
           .filter((t) => t.title.trim())
-          .map((t) => ({ title: t.title, column: col, type: tagsForTask(t)[0]?.label ?? "" })),
+          .map((t) => {
+            const tag = tagsForTask(t)[0];
+            const auto = tag && (tag.tone === "video" || tag.tone === "guion") ? tag.tone : null;
+            return { title: t.title, column: c.id, type: t.type ?? auto, label: tag?.label ?? "" };
+          }),
       ),
     [board],
   );
 
-  const boardTitles = useMemo(
-    () => COLUMNS.flatMap((c) => board[c.id].map((t) => t.title)).filter(Boolean),
-    [board],
-  );
+  // Mover una tarjeta a Hecho (o cambiarle el tipo) en el tablero se refleja en su mini-tarea.
+  useEffect(() => {
+    if (loaded) syncKrTasksWithBoard(okrCards);
+  }, [okrCards, loaded]);
+
+  function findByTitle(title: string): { task: Task; col: ColumnId } | undefined {
+    const key = sameText(title);
+    for (const c of COLUMNS) {
+      const task = board[c.id].find((t) => sameText(t.title) === key);
+      if (task) return { task, col: c.id };
+    }
+    return undefined;
+  }
+
+  // Marcar una mini-tarea la lleva a Hecho; desmarcarla la devuelve a la columna de
+  // la que había llegado a Hecho (o a Por Hacer si no se sabe).
+  function setBoardTaskDoneByTitle(title: string, done: boolean) {
+    const found = findByTitle(title);
+    if (!found) return;
+    if (done) {
+      if (found.col !== "done") handleMove(found.task.id, "done");
+      return;
+    }
+    if (found.col !== "done") return;
+    const lastIn = [...(found.task.history ?? [])].reverse().find((e) => e.to === "done");
+    const back = lastIn?.from && lastIn.from !== "done" ? lastIn.from : "todo";
+    handleMove(found.task.id, back);
+  }
+
+  function setBoardTaskTypeByTitle(title: string, type: string | null) {
+    const found = findByTitle(title);
+    if (!found) return;
+    if (type) ensureCustomType(type);
+    setBoard((prev) => ({
+      ...prev,
+      [found.col]: prev[found.col].map((t) => {
+        if (t.id !== found.task.id) return t;
+        const updated: Task = { ...t };
+        delete updated.type;
+        return type ? { ...updated, type } : updated;
+      }),
+    }));
+  }
+
+  function createBoardTaskFromOkr(title: string, type: string | null) {
+    if (type) ensureCustomType(type);
+    handleAddTask("todo", title, type ?? undefined);
+  }
 
   // Inicia un pomodoro desde OKRs: si la tarea existe en el tablero, aplica la misma
   // lógica (Por Hacer -> En Progreso); si no, solo abre el pomodoro con ese título.
   function startPomodoroByTitle(title: string) {
-    const found = COLUMNS.flatMap((c) => board[c.id].map((t) => ({ t, col: c.id }))).find(
-      (x) => x.t.title === title,
-    );
+    const found = findByTitle(title);
     if (found) {
-      void startPomodoro(found.t.id);
+      void startPomodoro(found.task.id);
       return;
     }
     setPomodoroTask(title);
     setTab("pomodoro");
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  // Marca como hecha en el tablero la tarea con ese título (si existe).
-  function completeBoardTaskByTitle(title: string) {
-    const found = COLUMNS.flatMap((c) => board[c.id].map((t) => ({ t, col: c.id }))).find(
-      (x) => x.t.title === title,
-    );
-    if (found && found.col !== "done") handleMove(found.t.id, "done");
   }
 
   function deleteSelected() {
@@ -1163,11 +1208,11 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
 
         <div className={tab === "okr" ? undefined : "hidden"} onClick={(e) => e.stopPropagation()}>
           <OkrPage
-            boardTitles={boardTitles}
-            boardTasks={pendingTasks}
-            onCreateBoardTask={(title) => handleAddTask("todo", title)}
-            onStartPomodoro={(title) => startPomodoroByTitle(title)}
-            onCompleteBoardTask={(title) => completeBoardTaskByTitle(title)}
+            boardTasks={okrCards}
+            onCreateBoardTask={createBoardTaskFromOkr}
+            onSetBoardTaskDone={setBoardTaskDoneByTitle}
+            onSetBoardTaskType={setBoardTaskTypeByTitle}
+            onStartPomodoro={startPomodoroByTitle}
           />
         </div>
 

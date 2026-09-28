@@ -11,7 +11,15 @@ export type KrTask = {
   boardTaskTitle: string;
   done: boolean;
   position: number;
+  /** Cuánto empuja el KR, de 1 a MAX_WEIGHT: una tarea de peso 3 vale el triple que una de 1. */
+  weight: number;
+  /** Tipo de la tarea en el tablero (el mismo id que Task.type); null = sin tipo. */
+  type: string | null;
 };
+
+export const MAX_WEIGHT = 5;
+export const clampWeight = (w: number) =>
+  Math.min(MAX_WEIGHT, Math.max(1, Math.round(Number.isFinite(w) ? w : 1)));
 
 /** "up": más es mejor (ventas, videos). "down": menos es mejor (ranking, costos). */
 export type Direction = "up" | "down";
@@ -75,11 +83,18 @@ export function metricProgress(kr: KeyResult): number {
   return Math.max(0, Math.min(100, Math.round((gained / total) * 100)));
 }
 
-/** Progreso por mini-tareas completadas (0-100), o null si no hay tareas. */
+/** Progreso por mini-tareas completadas, ponderado por su peso (0-100), o null si no hay tareas. */
 export function taskProgress(kr: KeyResult): number | null {
   if (kr.tasks.length === 0) return null;
-  const done = kr.tasks.filter((t) => t.done).length;
-  return Math.round((done / kr.tasks.length) * 100);
+  const total = kr.tasks.reduce((n, t) => n + t.weight, 0);
+  const done = kr.tasks.reduce((n, t) => n + (t.done ? t.weight : 0), 0);
+  return Math.round((done / total) * 100);
+}
+
+/** Qué parte del avance por tareas aporta esta tarea (0-100). */
+export function taskShare(kr: KeyResult, task: KrTask): number {
+  const total = kr.tasks.reduce((n, t) => n + t.weight, 0);
+  return total ? Math.round((task.weight / total) * 100) : 0;
 }
 
 /** Avance combinado del KR: métrica y mini-tareas a partes iguales (0-100). */
@@ -93,6 +108,53 @@ export function objectiveProgress(obj: Objective): number {
   if (obj.keyResults.length === 0) return 0;
   const sum = obj.keyResults.reduce((acc, kr) => acc + krProgress(kr), 0);
   return Math.round(sum / obj.keyResults.length);
+}
+
+/* --------------------------------- Ritmo --------------------------------- */
+
+export type PaceStatus = "done" | "onTrack" | "behind" | "overdue";
+
+export type KrPace = {
+  status: PaceStatus;
+  /** Porcentaje del plazo ya consumido, 0-100. */
+  elapsed: number;
+  /** Días que faltan (negativo = ya venció). */
+  daysLeft: number;
+};
+
+const DAY = 86_400_000;
+/** Margen para seguir "en ritmo" aunque vayas un poco por detrás del reloj. */
+const PACE_SLACK = 10;
+
+/** Fecha límite (AAAA-MM-DD) como el final de ese día en hora local. */
+export function dueTime(date: string): number | null {
+  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59).getTime();
+}
+
+/** Cómo va el KR frente a su fecha límite; null si no tiene fecha. */
+export function krPace(kr: KeyResult, now = Date.now()): KrPace | null {
+  const end = kr.dueDate ? dueTime(kr.dueDate) : null;
+  if (end == null) return null;
+  const span = end - kr.createdAt;
+  const elapsed = span <= 0 ? 100 : Math.min(100, Math.max(0, ((now - kr.createdAt) / span) * 100));
+  const progress = krProgress(kr);
+  // Días de calendario: el mismo día de la fecha límite ya es "0 días".
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const dueDay = new Date(end);
+  dueDay.setHours(0, 0, 0, 0);
+  const daysLeft = Math.round((dueDay.getTime() - today.getTime()) / DAY);
+  const status: PaceStatus =
+    progress >= 100
+      ? "done"
+      : now > end
+        ? "overdue"
+        : progress + PACE_SLACK >= elapsed
+          ? "onTrack"
+          : "behind";
+  return { status, elapsed: Math.round(elapsed), daysLeft };
 }
 
 /* ------------------------------- Almacén -------------------------------- */
@@ -165,6 +227,8 @@ export function normalizeOkrs(raw: unknown): Objective[] {
                   boardTaskTitle: str(t["boardTaskTitle"]),
                   done: t["done"] === true,
                   position: ti,
+                  weight: clampWeight(num(t["weight"], 1)),
+                  type: str(t["type"]) || null,
                 })),
             };
           }),
@@ -283,6 +347,7 @@ export async function createKrTask(
   keyResultId: string,
   title: string,
   boardTaskTitle: string,
+  opts: { weight?: number; type?: string | null } = {},
 ): Promise<void> {
   write(
     mapKrs((kr) =>
@@ -299,6 +364,8 @@ export async function createKrTask(
                 boardTaskTitle,
                 done: false,
                 position: kr.tasks.length,
+                weight: clampWeight(opts.weight ?? 1),
+                type: opts.type ?? null,
               },
             ],
           },
@@ -314,4 +381,63 @@ export async function setKrTaskDone(id: string, done: boolean): Promise<void> {
 
 export async function deleteKrTask(id: string): Promise<void> {
   write(mapKrs((kr) => ({ ...kr, tasks: kr.tasks.filter((t) => t.id !== id) })));
+}
+
+export async function updateKrTask(
+  id: string,
+  patch: Partial<Pick<KrTask, "weight" | "type">>,
+): Promise<void> {
+  const fixed =
+    patch.weight === undefined ? patch : { ...patch, weight: clampWeight(patch.weight) };
+  write(
+    mapKrs((kr) => ({ ...kr, tasks: kr.tasks.map((t) => (t.id === id ? { ...t, ...fixed } : t)) })),
+  );
+}
+
+/* ------------------------- Sincronía con el tablero ----------------------- */
+// Las mini-tareas son tareas normales del tablero: si su tarjeta llega a Hecho
+// la mini-tarea queda hecha (y al revés), y su tipo es el de la tarjeta.
+
+export type BoardTaskRef = {
+  title: string;
+  column: "todo" | "doing" | "done";
+  /** Task.type de la tarjeta (id del tipo), o null. */
+  type: string | null;
+};
+
+/** Para reconocer la misma tarea aunque cambien espacios, saltos o mayúsculas. */
+export const sameText = (v: string) => v.replace(/\s+/g, " ").trim().toLowerCase();
+
+export function boardIndex(tasks: BoardTaskRef[]): Map<string, BoardTaskRef> {
+  const map = new Map<string, BoardTaskRef>();
+  for (const t of tasks)
+    if (t.title.trim() && !map.has(sameText(t.title))) map.set(sameText(t.title), t);
+  return map;
+}
+
+/** La tarjeta del tablero de esta mini-tarea, si existe. */
+export const boardTaskOf = (index: Map<string, BoardTaskRef>, t: KrTask) =>
+  index.get(sameText(t.boardTaskTitle || t.title));
+
+/** Copia a los OKRs el estado de las tarjetas enlazadas; solo escribe si algo cambió. */
+export function syncKrTasksWithBoard(tasks: BoardTaskRef[]) {
+  const list = read();
+  if (list.length === 0) return;
+  const index = boardIndex(tasks);
+  let changed = false;
+  const next = list.map((o) => ({
+    ...o,
+    keyResults: o.keyResults.map((kr) => ({
+      ...kr,
+      tasks: kr.tasks.map((t) => {
+        const card = boardTaskOf(index, t);
+        if (!card) return t;
+        const done = card.column === "done";
+        if (done === t.done && card.type === t.type) return t;
+        changed = true;
+        return { ...t, done, type: card.type };
+      }),
+    })),
+  }));
+  if (changed) write(next);
 }

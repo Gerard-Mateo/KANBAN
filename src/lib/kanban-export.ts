@@ -252,6 +252,8 @@ function appendOkrSheets(wb: XLSX.WorkBook, okrs: Objective[]) {
         Tarea: t.title,
         "Tarea del tablero": t.boardTaskTitle,
         Hecha: t.done ? "Sí" : "No",
+        Peso: t.weight,
+        Tipo: t.type ? typeLabel(t.type) : "",
       })),
     ),
   );
@@ -282,7 +284,7 @@ function appendOkrSheets(wb: XLSX.WorkBook, okrs: Objective[]) {
   const taskSheet = XLSX.utils.json_to_sheet(
     taskRows.length ? taskRows : [{ "Ref KR": "", Tarea: "", "Tarea del tablero": "", Hecha: "" }],
   );
-  taskSheet["!cols"] = [{ wch: 9 }, { wch: 48 }, { wch: 48 }, { wch: 7 }];
+  taskSheet["!cols"] = [{ wch: 9 }, { wch: 48 }, { wch: 48 }, { wch: 7 }, { wch: 6 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, taskSheet, KR_TASK_SHEET);
 }
 
@@ -381,6 +383,9 @@ function parseOkrSheets(wb: XLSX.WorkBook): Objective[] | null {
       title,
       boardTaskTitle: text(r["Tarea del tablero"]) || title,
       done: ["si", "sí", "true", "1", "x", "yes"].includes(norm(text(r["Hecha"]))),
+      // Los Excel de antes no traen peso ni tipo: peso 1 y sin tipo.
+      weight: numOr(r["Peso"], 1),
+      type: typeFromLabel(r["Tipo"]) ?? null,
     });
   }
 

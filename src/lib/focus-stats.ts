@@ -1,6 +1,6 @@
 // Métricas de Pomodoro y de OKRs/SMART para la pestaña de estadísticas.
 import { COLUMNS, type BoardState } from "./kanban-data";
-import { krProgress, type Objective } from "./okrs";
+import { krPace, krProgress, type Objective, type PaceStatus } from "./okrs";
 import type { PomodoroSession } from "./pomodoro-cloud";
 import { typeOf } from "./task-stats";
 
@@ -145,7 +145,7 @@ export function formatMinutes(total: number): string {
 
 /* ------------------------------- OKR / SMART ------------------------------ */
 
-export type PaceStatus = "done" | "onTrack" | "behind" | "overdue";
+export type { PaceStatus };
 
 export type PacePoint = {
   id: string;
@@ -160,47 +160,25 @@ export type PacePoint = {
   status: PaceStatus;
 };
 
-/** Margen para seguir "en ritmo" aunque vayas un poco por debajo de la diagonal. */
-const PACE_SLACK = 10;
-
-/** Fecha límite (yyyy-mm-dd) como final de ese día en hora local. */
-function dueTime(date: string): number | null {
-  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59).getTime();
-}
-
 export function pacePoints(objectives: Objective[], now = Date.now()) {
   const points: PacePoint[] = [];
   let undated = 0;
   for (const obj of objectives) {
     for (const kr of obj.keyResults) {
-      const end = kr.dueDate ? dueTime(kr.dueDate) : null;
-      if (end == null) {
+      const pace = krPace(kr, now);
+      if (!pace) {
         undated += 1;
         continue;
       }
-      const span = end - kr.createdAt;
-      const elapsed =
-        span <= 0 ? 100 : Math.min(100, Math.max(0, ((now - kr.createdAt) / span) * 100));
-      const progress = krProgress(kr);
-      const status: PaceStatus =
-        progress >= 100
-          ? "done"
-          : now > end
-            ? "overdue"
-            : progress + PACE_SLACK >= elapsed
-              ? "onTrack"
-              : "behind";
       points.push({
         id: kr.id,
         title: kr.title,
         objective: obj.title,
-        progress,
-        elapsed: Math.round(elapsed),
+        progress: krProgress(kr),
+        elapsed: pace.elapsed,
         dueDate: kr.dueDate!,
-        daysLeft: Math.ceil((end - now) / DAY),
-        status,
+        daysLeft: pace.daysLeft,
+        status: pace.status,
       });
     }
   }

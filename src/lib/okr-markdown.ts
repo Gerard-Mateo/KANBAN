@@ -1,7 +1,11 @@
 // OKRs en Markdown: el formato que tu IA escribe y la app importa de un golpe.
 // Un solo formato para tres cosas: el prompt (se lo explica a la IA), la
 // importación (lo lee con tolerancia) y la exportación (lo escribe igual).
-import { normalizeOkrs, type Direction, type Objective } from "./okrs";
+import { TYPE_LABELS, typeLabel } from "./kanban-data";
+import { MAX_WEIGHT, clampWeight, normalizeOkrs, type Direction, type Objective } from "./okrs";
+
+/** Un tipo de tarea tal como lo conoce la app: su id (Task.type) y su nombre visible. */
+export type TypeRef = { id: string; label: string };
 
 /* --------------------------------- Formato -------------------------------- */
 
@@ -25,9 +29,9 @@ Descripción: Que los clientes nos elijan porque aprenden a usar el sistema solo
 - Meta: 20
 
 Tareas:
-- [ ] Escribir el guion de la pantalla Roles de Pago
-- [ ] Grabar y editar el video de Roles de Pago
-- [x] Definir la plantilla visual de los videos
+- [ ] Escribir el guion de la pantalla Roles de Pago | tipo: Guion | peso: 2
+- [ ] Grabar y editar el video de Roles de Pago | tipo: Video | peso: 3
+- [x] Definir la plantilla visual de los videos | tipo: Video | peso: 1
 
 ### KR: Bajar los tickets de "cómo se hace" de 40 a 15 por mes
 - Específico: tickets etiquetados como duda de uso
@@ -42,8 +46,8 @@ Tareas:
 - Meta: 15
 
 Tareas:
-- [ ] Sacar el top 10 de dudas del último trimestre
-- [ ] Enlazar cada video en la respuesta automática del ticket`;
+- [ ] Sacar el top 10 de dudas del último trimestre | tipo: General | peso: 2
+- [ ] Enlazar cada video en la respuesta automática del ticket | tipo: General | peso: 4`;
 
 const clean = (v: string) => v.replace(/\s+/g, " ").trim();
 
@@ -73,7 +77,10 @@ export function okrsToMarkdown(objectives: Objective[]): string {
       for (const [k, v] of fields) if (v.trim()) out.push(`- ${k}: ${line(v)}`);
       if (kr.tasks.length) {
         out.push("", "Tareas:");
-        for (const t of kr.tasks) out.push(`- [${t.done ? "x" : " "}] ${line(t.title)}`);
+        for (const t of kr.tasks) {
+          const type = t.type ? ` | tipo: ${typeLabel(t.type)}` : "";
+          out.push(`- [${t.done ? "x" : " "}] ${line(t.title)}${type} | peso: ${t.weight}`);
+        }
       }
     }
   }
@@ -170,7 +177,7 @@ type DraftKr = {
   startValue: number | null;
   currentValue: number | null;
   targetValue: number | null;
-  tasks: { title: string; done: boolean }[];
+  tasks: DraftTask[];
   /** Traía una fecha que no se pudo leer (ya se avisó). */
   badDate: boolean;
 };
@@ -220,13 +227,48 @@ const stripPrefix = (text: string, kind: "objective" | "kr") =>
       ),
   );
 
+const TYPE_KEYS = new Set(["tipo", "type", "tag", "etiqueta"]);
+const WEIGHT_KEYS = new Set(["peso", "weight", "w", "p"]);
+
+type DraftTask = { title: string; done: boolean; weight: number | null; typeLabel: string | null };
+
+/** "Grabar video | tipo: Video | peso: 3" → título + atributos. Un tramo que no
+ * es atributo se queda en el título (por si el título lleva una barra). */
+function parseTaskLine(text: string, done: boolean): DraftTask {
+  const task: DraftTask = { title: "", done, weight: null, typeLabel: null };
+  const title: string[] = [];
+  for (const part of text.split("|")) {
+    const attr = part.trim().match(/^([\p{L}]+)\s*[:=]\s*(.+)$/u);
+    const key = attr ? norm(attr[1]!) : "";
+    if (attr && TYPE_KEYS.has(key)) task.typeLabel = attr[2]!.trim();
+    else if (attr && WEIGHT_KEYS.has(key)) task.weight = parseNumber(attr[2]!);
+    else title.push(part);
+  }
+  let joined = clean(title.join("|"));
+  // Por si la IA lo escribe entre paréntesis: "Grabar video (peso 3)".
+  const paren = joined.match(/\s*\((?:peso|weight)\s*[:=]?\s*(\d+(?:[.,]\d+)?)\)\s*$/i);
+  if (paren) {
+    task.weight ??= parseNumber(paren[1]!);
+    joined = joined.slice(0, paren.index).trim();
+  }
+  task.title = joined;
+  return task;
+}
+
+/** Nombre de tipo escrito por la IA → id del tipo en la app (sin importar mayúsculas ni tildes). */
+function typeIdFor(label: string, known: TypeRef[]): string {
+  const n = norm(label);
+  for (const [id, text] of Object.entries(TYPE_LABELS)) if (norm(text) === n || id === n) return id;
+  return known.find((t) => norm(t.label) === n || norm(t.id) === n)?.id ?? label.trim();
+}
+
 export type ParsedOkrs = {
   objectives: Objective[];
   counts: { objectives: number; keyResults: number; tasks: number };
   warnings: string[];
 };
 
-export function parseOkrMarkdown(text: string): ParsedOkrs {
+export function parseOkrMarkdown(text: string, knownTypes: TypeRef[] = []): ParsedOkrs {
   const objectives: DraftObjective[] = [];
   const warnings: string[] = [];
   let obj: DraftObjective | null = null;
@@ -295,13 +337,13 @@ export function parseOkrMarkdown(text: string): ParsedOkrs {
 
     const box = item.match(/^\[( |x|X)\]\s*(.*)$/);
     if (box) {
-      const title = clean(box[2]!);
-      if (!title) continue;
+      const task = parseTaskLine(box[2]!, box[1] !== " ");
+      if (!task.title) continue;
       if (!kr) {
-        warnings.push(`La tarea "${title}" no está debajo de ningún KR; se omitió.`);
+        warnings.push(`La tarea "${task.title}" no está debajo de ningún KR; se omitió.`);
         continue;
       }
-      kr.tasks.push({ title, done: box[1] !== " " });
+      kr.tasks.push(task);
       continue;
     }
 
@@ -338,8 +380,8 @@ export function parseOkrMarkdown(text: string): ParsedOkrs {
 
     // Viñeta sin casilla dentro de "Tareas:" = tarea pendiente.
     if (inTasks && kr && bullet) {
-      const title = clean(item);
-      if (title) kr.tasks.push({ title, done: false });
+      const task = parseTaskLine(item, false);
+      if (task.title) kr.tasks.push(task);
       continue;
     }
 
@@ -383,7 +425,17 @@ export function parseOkrMarkdown(text: string): ParsedOkrs {
           direction,
           dueDate: k.dueDate,
           createdAt: Date.now(),
-          tasks: k.tasks.map((t) => ({ title: t.title, boardTaskTitle: t.title, done: t.done })),
+          tasks: k.tasks.map((t) => {
+            if (t.weight !== null && (t.weight < 1 || t.weight > MAX_WEIGHT))
+              warnings.push(`"${t.title}": peso ${t.weight} fuera de 1-${MAX_WEIGHT}; se ajustó.`);
+            return {
+              title: t.title,
+              boardTaskTitle: t.title,
+              done: t.done,
+              weight: clampWeight(t.weight ?? 1),
+              type: t.typeLabel ? typeIdFor(t.typeLabel, knownTypes) : null,
+            };
+          }),
         };
       }),
     }));
@@ -409,9 +461,12 @@ export function buildOkrPrompt({
   goals,
   current,
   boardTasks,
+  types,
   today = new Date(),
 }: {
   goals: string;
+  /** Nombres de los tipos de tarea que existen en la app, para que la IA etiquete cada tarea. */
+  types: string[];
   /** OKRs actuales para que la IA los mejore; vacío = empezar de cero. */
   current: Objective[];
   /** Tareas pendientes del tablero, para que la IA las reutilice con su título exacto. */
@@ -447,8 +502,10 @@ Fecha de hoy: ${date}.`);
     boardTasks.length
       ? ` Si una tarea ya está en mi tablero (lista de abajo), copia su título EXACTO, letra por letra, para que se vincule.`
       : ""
-  }
-8. Escribe en español${refine ? ". Mantén lo que ya está bien, corrige lo que no es SMART y conserva los valores Actual y las tareas marcadas [x]" : ""}.`);
+  } Las tareas se crean como tarjetas en mi tablero Kanban.
+8. Cada tarea lleva un tipo, que es su etiqueta en el tablero. Usa uno de mis tipos: ${types.join(", ")}. Solo si ninguno encaja, inventa uno corto (una o dos palabras).
+9. Cada tarea lleva un peso de 1 a ${MAX_WEIGHT}: cuánto mueve el KR al terminarla. ${MAX_WEIGHT} = la tarea decisiva sin la que el KR no se logra, 3 = importante, 1 = trámite o preparación. El avance del KR por tareas se reparte según el peso (una de peso 4 vale el cuádruple que una de 1), así que diferencia de verdad: no pongas a todas el mismo peso.
+10. Escribe en español${refine ? ". Mantén lo que ya está bien, corrige lo que no es SMART y conserva los valores Actual y las tareas marcadas [x]" : ""}.`);
 
   parts.push(`## Formato de la respuesta (obligatorio)
 Responde SOLO con un bloque de código \`\`\`markdown que siga exactamente esta plantilla, sin texto antes ni después${
@@ -461,7 +518,7 @@ Responde SOLO con un bloque de código \`\`\`markdown que siga exactamente esta 
 - Los campos del KR con estos nombres exactos: Específico, Medible, Alcanzable, Relevante, Fecha límite, Dirección, Unidad, Inicial, Actual, Meta.
 - Inicial, Actual y Meta: solo el número, sin unidad ni separador de miles (1500, no "1.500 USD").
 - Fecha límite en formato AAAA-MM-DD.
-- Después de los campos, una línea "Tareas:" y cada tarea como casilla "- [ ] …" ("- [x] …" solo si ya está hecha).
+- Después de los campos, una línea "Tareas:" y cada tarea como casilla con su tipo y su peso separados por barras: "- [ ] Título de la tarea | tipo: Video | peso: 3" ("- [x] …" solo si ya está hecha).
 
 Plantilla:
 
@@ -487,7 +544,9 @@ ${okrsToMarkdown(current).trim()}
     const todo = byCol("todo");
     parts.push(`## Mi tablero de tareas (pendientes)
 Úsalas para entender en qué trabajo y reutilízalas como tareas de los KR cuando encajen. Entre corchetes va el tipo de tarea.
-${doing ? `\nEn progreso:\n${doing}\n` : ""}${todo ? `\nPor hacer:\n${todo}` : ""}`);
+${doing ? `\nEn progreso:\n${doing}\n` : ""}${todo ? `\nPor hacer:\n${todo}` : ""}
+
+Si reutilizas una de estas tareas, mantén su tipo (el que va entre corchetes).`);
   }
 
   return parts.join("\n\n") + "\n";
