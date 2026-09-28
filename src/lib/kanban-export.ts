@@ -11,7 +11,7 @@ import {
   type TagTone,
   type Task,
 } from "./kanban-data";
-import { getCustomTypes, hueFromValue, hueName } from "./custom-types";
+import { colorFromValue, colorHex, colorOf, getCustomTypes } from "./custom-types";
 
 type Row = {
   Estado: string;
@@ -132,7 +132,7 @@ export function buildXlsxBuffer(board: BoardState): ArrayBuffer {
   const customTypes = getCustomTypes();
   if (customTypes.length) {
     const typeSheet = XLSX.utils.json_to_sheet(
-      customTypes.map((c) => ({ Tipo: c.label, Color: hueName(c.hue) })),
+      customTypes.map((c) => ({ Tipo: c.label, Color: colorHex(colorOf(c.label, customTypes)) })),
     );
     typeSheet["!cols"] = [{ wch: 26 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, typeSheet, "Tipos");
@@ -204,7 +204,7 @@ function parseLocalDate(value: unknown): number | undefined {
   return Number.isNaN(t) ? undefined : t;
 }
 
-export type ImportedType = { label: string; hue: number };
+export type ImportedType = { label: string; hue: number; chroma: number };
 export type ImportResult = {
   board: BoardState;
   taskCount: number;
@@ -255,8 +255,8 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
     });
     for (const row of rows) {
       const label = String(row["Tipo"] ?? "").trim();
-      const hue = hueFromValue(row["Color"]);
-      if (label && hue !== undefined) types.push({ label, hue });
+      const color = colorFromValue(row["Color"]);
+      if (label && color) types.push({ label, ...color });
     }
   }
 

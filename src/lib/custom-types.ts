@@ -3,10 +3,20 @@
 // (por navegador, en localStorage).
 import { useMemo, useSyncExternalStore, type CSSProperties } from "react";
 import { BUILTIN_TONES, isBuiltinTone, typeLabel } from "./kanban-data";
+import { hexToOklch, oklchToHex } from "./oklch";
 
-export type CustomType = { label: string; hue: number };
+// Un color es cualquier tono (0-360) con cualquier intensidad (0 = gris,
+// MAX_CHROMA = neón). La luminosidad no se guarda: cada uso (punto, pastilla,
+// gráfica) pone la suya para que siempre se lea sobre el fondo oscuro.
+// `chroma` es opcional para que los tipos guardados antes sigan valiendo.
+export type CustomType = { label: string; hue: number; chroma?: number | undefined };
+export type TypeColor = { hue: number; chroma: number };
+
+export const DEFAULT_CHROMA = 0.17;
+export const MAX_CHROMA = 0.22;
 
 const KEY = "kanban-custom-types-v1";
+/** Atajos rápidos del selector; no limitan qué colores se pueden elegir. */
 export const HUES = [25, 55, 85, 150, 200, 264, 300, 340];
 const EMPTY: CustomType[] = [];
 
@@ -19,7 +29,11 @@ function read(): CustomType[] {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "[]") as unknown;
     cache = Array.isArray(raw)
       ? raw.filter(
-          (r): r is CustomType => !!r && typeof r.label === "string" && typeof r.hue === "number",
+          (r): r is CustomType =>
+            !!r &&
+            typeof r.label === "string" &&
+            typeof r.hue === "number" &&
+            (r.chroma === undefined || typeof r.chroma === "number"),
         )
       : [];
   } catch {
@@ -82,12 +96,24 @@ const hashHue = (label: string) => {
 // cian de la Grid para Guion, para que no se confundan entre sí.
 const BUILTIN_HUES: Record<string, number> = { video: 32, guion: 220 };
 
-export const hueFor = (label: string, list: CustomType[]) =>
-  list.find((c) => c.label === label)?.hue ?? BUILTIN_HUES[label] ?? hashHue(label);
+export function colorOf(label: string, list: CustomType[]): TypeColor {
+  const own = list.find((c) => c.label === label);
+  if (own) return { hue: own.hue, chroma: own.chroma ?? DEFAULT_CHROMA };
+  return { hue: BUILTIN_HUES[label] ?? hashHue(label), chroma: DEFAULT_CHROMA };
+}
+
+export const clampColor = (hue: number, chroma: number): TypeColor => ({
+  hue: ((hue % 360) + 360) % 360,
+  chroma: Math.min(MAX_CHROMA, Math.max(0, chroma)),
+});
+
+/** Color del punto del tipo, en hex (es lo que va al Excel). */
+export const colorHex = (c: TypeColor) => oklchToHex(0.62, c.chroma, c.hue);
+export const dotCss = (c: TypeColor) => `oklch(0.62 ${c.chroma} ${c.hue})`;
 
 export function addCustomType(
   rawLabel: string,
-  hue: number,
+  color: TypeColor,
 ): { ok: true; label: string } | { ok: false; error: string } {
   const label = rawLabel.trim().replace(/\s+/g, " ");
   if (!/[\p{L}\p{N}]/u.test(label)) return { ok: false, error: "Escribe un nombre." };
@@ -97,7 +123,7 @@ export function addCustomType(
     BUILTIN_TONES.some((id) => norm(typeLabel(id)) === n || id === n) ||
     read().some((c) => norm(c.label) === n);
   if (taken) return { ok: false, error: "Ya existe un tipo con ese nombre." };
-  write([...read(), { label, hue }]);
+  write([...read(), { label, hue: color.hue, chroma: color.chroma }]);
   return { ok: true, label };
 }
 
@@ -110,13 +136,14 @@ export function ensureCustomType(label: string) {
 export const getCustomTypes = () => read();
 
 /** Crea el tipo con ese color, o le cambia el color si ya existe. */
-export function upsertCustomType(label: string, hue: number) {
+export function upsertCustomType(label: string, color: TypeColor) {
   if (!label || isBuiltinTone(label)) return;
+  const { hue, chroma } = clampColor(color.hue, color.chroma);
   const list = read();
   if (list.some((c) => c.label === label)) {
-    write(list.map((c) => (c.label === label ? { ...c, hue } : c)));
+    write(list.map((c) => (c.label === label ? { ...c, hue, chroma } : c)));
   } else {
-    write([...list, { label, hue }]);
+    write([...list, { label, hue, chroma }]);
   }
 }
 
@@ -132,30 +159,31 @@ export const HUE_NAMES = [
   "Rosa",
 ];
 
-export const hueName = (hue: number) => HUE_NAMES[HUES.indexOf(hue)] ?? String(hue);
-
-/** Acepta el nombre del color ("Rosa") o el número de matiz. */
-export function hueFromValue(value: unknown): number | undefined {
+/** Lee el color del Excel: un hex (#e05a3c, lo que exportamos ahora), el
+ * nombre de un color de los de antes ("Rosa") o un número de matiz. */
+export function colorFromValue(value: unknown): TypeColor | undefined {
   const raw = String(value ?? "").trim();
   if (!raw) return undefined;
+  const lch = hexToOklch(raw);
+  if (lch) return clampColor(lch.h, lch.c);
   const byName = HUE_NAMES.findIndex((n) => norm(n) === norm(raw));
-  if (byName >= 0) return HUES[byName];
+  if (byName >= 0) return { hue: HUES[byName]!, chroma: DEFAULT_CHROMA };
   const num = Number(raw);
-  return Number.isFinite(num) ? ((num % 360) + 360) % 360 : undefined;
+  return Number.isFinite(num) ? clampColor(num, DEFAULT_CHROMA) : undefined;
 }
 
 export function removeCustomType(label: string) {
   write(read().filter((c) => c.label !== label));
 }
 
-export function typeChipStyle(label: string, list: CustomType[]): CSSProperties {
-  const h = hueFor(label, list);
-  // Pastilla oscura con texto de neón, para que brille sobre la rejilla negra.
+/** Pastilla oscura con texto de neón, para que brille sobre la rejilla negra. */
+export function chipCss(c: TypeColor): CSSProperties {
   return {
-    backgroundColor: `oklch(0.28 0.07 ${h})`,
-    color: `oklch(0.82 0.17 ${h})`,
+    backgroundColor: `oklch(0.28 ${(c.chroma * 0.41).toFixed(4)} ${c.hue})`,
+    color: `oklch(0.82 ${c.chroma} ${c.hue})`,
   };
 }
 
-export const typeDotColor = (label: string, list: CustomType[]) =>
-  `oklch(0.62 0.17 ${hueFor(label, list)})`;
+export const typeChipStyle = (label: string, list: CustomType[]) => chipCss(colorOf(label, list));
+
+export const typeDotColor = (label: string, list: CustomType[]) => dotCss(colorOf(label, list));

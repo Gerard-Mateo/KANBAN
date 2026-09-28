@@ -1,5 +1,5 @@
 // Tokens compartidos por las gráficas de la pestaña Stats (tema TRON oscuro).
-import { hueFor, type CustomType } from "@/lib/custom-types";
+import { colorOf, type CustomType } from "@/lib/custom-types";
 
 // Slots categóricos TRON (orden fijo, nunca ciclado), validados contra el
 // fondo oscuro: rojo Ares, cian de la Grid, ámbar, magenta, violeta, verde,
@@ -45,7 +45,8 @@ export const tooltipStyle = {
  * (Módulo, General) van en gris, igual que allí. */
 export function typeColor(id: string, custom: CustomType[]): string {
   if (id === "module" || id === "other") return "oklch(0.74 0.02 264)";
-  return `oklch(0.68 0.19 ${hueFor(id, custom)})`;
+  const c = colorOf(id, custom);
+  return `oklch(0.68 ${(c.chroma * 1.12).toFixed(4)} ${c.hue})`;
 }
 
 /** Topes redondos para un eje: 1, 2, 5 × 10ⁿ, con ~4 marcas. */

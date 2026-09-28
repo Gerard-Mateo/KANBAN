@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
 import {
-  HUES,
   addCustomType,
+  colorOf,
   removeCustomType,
   typeDotColor,
   upsertCustomType,
   useCustomTypes,
+  type TypeColor,
 } from "@/lib/custom-types";
+import { ColorPicker, randomColor } from "./ColorPicker";
 
 export function TypeDot({ label }: { label: string }) {
   const custom = useCustomTypes();
@@ -24,7 +26,7 @@ export function TypeCreator({ onCreated }: { onCreated: (label: string) => void 
   const custom = useCustomTypes();
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState("");
-  const [hue, setHue] = useState(HUES[5]!);
+  const [color, setColor] = useState<TypeColor>(randomColor);
   const [error, setError] = useState<string | null>(null);
   const [recoloring, setRecoloring] = useState<string | null>(null);
 
@@ -36,7 +38,7 @@ export function TypeCreator({ onCreated }: { onCreated: (label: string) => void 
   }
 
   function create() {
-    const res = addCustomType(label, hue);
+    const res = addCustomType(label, color);
     if (!res.ok) {
       setError(res.error);
       return;
@@ -49,7 +51,10 @@ export function TypeCreator({ onCreated }: { onCreated: (label: string) => void 
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setColor(randomColor());
+          setOpen(true);
+        }}
         className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
       >
         <Plus className="size-3" /> Nuevo tipo
@@ -81,21 +86,6 @@ export function TypeCreator({ onCreated }: { onCreated: (label: string) => void 
           placeholder="Nombre del tipo (p. ej. Reunión)"
           className="min-w-40 flex-1 rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-primary"
         />
-        <div className="flex items-center gap-1">
-          {HUES.map((h) => (
-            <button
-              key={h}
-              type="button"
-              aria-label={`Color ${h}`}
-              onClick={() => setHue(h)}
-              className="size-4 rounded-full ring-offset-1 ring-offset-secondary transition-shadow"
-              style={{
-                backgroundColor: `oklch(0.62 0.17 ${h})`,
-                boxShadow: hue === h ? "0 0 0 2px var(--foreground)" : undefined,
-              }}
-            />
-          ))}
-        </div>
         <button
           type="button"
           onClick={create}
@@ -112,6 +102,11 @@ export function TypeCreator({ onCreated }: { onCreated: (label: string) => void 
         </button>
       </div>
       {error && <p className="mt-1.5 text-[11px] font-medium text-destructive">{error}</p>}
+      {!recoloring && (
+        <div className="mt-2.5">
+          <ColorPicker value={color} onChange={setColor} previewLabel={label} />
+        </div>
+      )}
       {custom.length > 0 && (
         <div className="mt-2 border-t border-border pt-2">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -143,21 +138,25 @@ export function TypeCreator({ onCreated }: { onCreated: (label: string) => void 
             ))}
           </div>
           {recoloring && (
-            <div className="mt-2 flex items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">Color de {recoloring}:</span>
-              {HUES.map((h) => (
+            <div className="mt-2.5 rounded-lg border border-border bg-card/60 p-2.5">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-[11px] text-muted-foreground">
+                  Color de <span className="font-medium text-foreground">{recoloring}</span> (se
+                  aplica al instante)
+                </span>
                 <button
-                  key={h}
                   type="button"
-                  aria-label={`Color ${h} para ${recoloring}`}
-                  onClick={() => {
-                    upsertCustomType(recoloring, h);
-                    setRecoloring(null);
-                  }}
-                  className="size-4 rounded-full"
-                  style={{ backgroundColor: `oklch(0.62 0.17 ${h})` }}
-                />
-              ))}
+                  onClick={() => setRecoloring(null)}
+                  className="ml-auto rounded-md bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Listo
+                </button>
+              </div>
+              <ColorPicker
+                value={colorOf(recoloring, custom)}
+                onChange={(c) => upsertCustomType(recoloring, c)}
+                previewLabel={recoloring}
+              />
             </div>
           )}
         </div>

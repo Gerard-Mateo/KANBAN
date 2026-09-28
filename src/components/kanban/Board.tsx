@@ -1014,7 +1014,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
               <FileMenu
                 board={board}
                 onImport={(next, types) => {
-                  for (const t of types) upsertCustomType(t.label, t.hue);
+                  for (const t of types) upsertCustomType(t.label, t);
                   registerBoardTypes(next);
                   setBoard(next);
                   setSelected(new Set());
