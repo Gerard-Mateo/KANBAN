@@ -1,6 +1,6 @@
 // Métricas de Pomodoro y de OKRs/SMART para la pestaña de estadísticas.
 import { COLUMNS, type BoardState } from "./kanban-data";
-import { krProgress, type Objective } from "./okr-cloud";
+import { krProgress, type Objective } from "./okrs";
 import type { PomodoroSession } from "./pomodoro-cloud";
 import { typeOf } from "./task-stats";
 

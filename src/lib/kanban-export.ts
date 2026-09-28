@@ -12,6 +12,7 @@ import {
   type Task,
 } from "./kanban-data";
 import { colorFromValue, colorHex, colorOf, getCustomTypes } from "./custom-types";
+import { getOkrs, krProgress, normalizeOkrs, objectiveProgress, type Objective } from "./okrs";
 
 type Row = {
   Estado: string;
@@ -138,6 +139,8 @@ export function buildXlsxBuffer(board: BoardState): ArrayBuffer {
     XLSX.utils.book_append_sheet(wb, typeSheet, "Tipos");
   }
 
+  appendOkrSheets(wb, getOkrs());
+
   return XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
 }
 
@@ -204,12 +207,178 @@ function parseLocalDate(value: unknown): number | undefined {
   return Number.isNaN(t) ? undefined : t;
 }
 
+/* --------------------------------- OKRs ---------------------------------- */
+// Tres hojas planas enlazadas por referencias legibles: O1 es el objetivo 1 y
+// O1.KR2 su segundo resultado clave. Así el Excel se puede leer a mano y, al
+// importarlo, cada KR y cada tarea vuelve a su sitio.
+
+const OBJ_SHEET = "Objetivos";
+const KR_SHEET = "Resultados clave";
+const KR_TASK_SHEET = "Tareas KR";
+
+function appendOkrSheets(wb: XLSX.WorkBook, okrs: Objective[]) {
+  if (okrs.length === 0) return;
+  const objRows = okrs.map((o, oi) => ({
+    Ref: `O${oi + 1}`,
+    Objetivo: o.title,
+    Descripción: o.description,
+    Periodo: o.period,
+    Estado: o.status,
+    "Avance %": objectiveProgress(o),
+  }));
+  const krRows = okrs.flatMap((o, oi) =>
+    o.keyResults.map((kr, ki) => ({
+      Ref: `O${oi + 1}.KR${ki + 1}`,
+      "Ref objetivo": `O${oi + 1}`,
+      "Resultado clave": kr.title,
+      Específico: kr.specific,
+      Medible: kr.measurable,
+      Alcanzable: kr.achievable,
+      Relevante: kr.relevant,
+      "Con plazo": kr.timeBound,
+      Unidad: kr.unit,
+      Inicio: kr.startValue,
+      Actual: kr.currentValue,
+      Meta: kr.targetValue,
+      "Fecha límite": kr.dueDate ?? "",
+      Creado: new Date(kr.createdAt).toLocaleString("es-EC"),
+      "Avance %": krProgress(kr),
+    })),
+  );
+  const taskRows = okrs.flatMap((o, oi) =>
+    o.keyResults.flatMap((kr, ki) =>
+      kr.tasks.map((t) => ({
+        "Ref KR": `O${oi + 1}.KR${ki + 1}`,
+        Tarea: t.title,
+        "Tarea del tablero": t.boardTaskTitle,
+        Hecha: t.done ? "Sí" : "No",
+      })),
+    ),
+  );
+
+  const objSheet = XLSX.utils.json_to_sheet(objRows);
+  objSheet["!cols"] = [{ wch: 6 }, { wch: 48 }, { wch: 48 }, { wch: 12 }, { wch: 10 }, { wch: 9 }];
+  XLSX.utils.book_append_sheet(wb, objSheet, OBJ_SHEET);
+
+  const krSheet = XLSX.utils.json_to_sheet(
+    krRows.length ? krRows : [{ Ref: "", "Ref objetivo": "", "Resultado clave": "" }],
+  );
+  krSheet["!cols"] = [
+    { wch: 9 },
+    { wch: 12 },
+    { wch: 44 },
+    ...Array.from({ length: 5 }, () => ({ wch: 30 })),
+    { wch: 10 },
+    { wch: 8 },
+    { wch: 8 },
+    { wch: 8 },
+    { wch: 13 },
+    { wch: 20 },
+    { wch: 9 },
+  ];
+  XLSX.utils.book_append_sheet(wb, krSheet, KR_SHEET);
+
+  const taskSheet = XLSX.utils.json_to_sheet(
+    taskRows.length ? taskRows : [{ "Ref KR": "", Tarea: "", "Tarea del tablero": "", Hecha: "" }],
+  );
+  taskSheet["!cols"] = [{ wch: 9 }, { wch: 48 }, { wch: 48 }, { wch: 7 }];
+  XLSX.utils.book_append_sheet(wb, taskSheet, KR_TASK_SHEET);
+}
+
+/** "2026-10-01" tal cual, o una fecha que Excel haya convertido por su cuenta. */
+function isoDay(value: unknown): string | null {
+  if (value instanceof Date) {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${value.getFullYear()}-${p(value.getMonth() + 1)}-${p(value.getDate())}`;
+  }
+  const s = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const t = parseLocalDate(s);
+  return t === undefined ? null : isoDay(new Date(t));
+}
+
+const rows = (wb: XLSX.WorkBook, name: string) => {
+  const sheet = wb.SheetNames.find((n) => norm(n) === norm(name));
+  return sheet
+    ? XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheet]!, { defval: "" })
+    : null;
+};
+
+/** null si el archivo no trae OKRs (así importar un Excel viejo no borra los tuyos). */
+function parseOkrSheets(wb: XLSX.WorkBook): Objective[] | null {
+  const objRows = rows(wb, OBJ_SHEET);
+  if (!objRows) return null;
+  const text = (v: unknown) => String(v ?? "").trim();
+  const numOr = (v: unknown, d: number) => {
+    const n = Number(v);
+    return v === "" || !Number.isFinite(n) ? d : n;
+  };
+
+  const byRef = new Map<string, Record<string, unknown>>();
+  const byTitle = new Map<string, Record<string, unknown>>();
+  const objectives: Record<string, unknown>[] = [];
+  for (const r of objRows) {
+    const title = text(r["Objetivo"]);
+    if (!title) continue;
+    const obj: Record<string, unknown> = {
+      title,
+      description: text(r["Descripción"]),
+      period: text(r["Periodo"]),
+      status: text(r["Estado"]) || "active",
+      keyResults: [] as Record<string, unknown>[],
+    };
+    objectives.push(obj);
+    if (text(r["Ref"])) byRef.set(norm(text(r["Ref"])), obj);
+    byTitle.set(norm(title), obj);
+  }
+
+  const krByRef = new Map<string, Record<string, unknown>>();
+  for (const r of rows(wb, KR_SHEET) ?? []) {
+    const title = text(r["Resultado clave"]);
+    const parent =
+      byRef.get(norm(text(r["Ref objetivo"]))) ?? byTitle.get(norm(text(r["Objetivo"])));
+    if (!title || !parent) continue;
+    const kr: Record<string, unknown> = {
+      title,
+      specific: text(r["Específico"]),
+      measurable: text(r["Medible"]),
+      achievable: text(r["Alcanzable"]),
+      relevant: text(r["Relevante"]),
+      timeBound: text(r["Con plazo"]),
+      unit: text(r["Unidad"]),
+      startValue: numOr(r["Inicio"], 0),
+      currentValue: numOr(r["Actual"], 0),
+      targetValue: numOr(r["Meta"], 100),
+      dueDate: isoDay(r["Fecha límite"]),
+      createdAt: parseLocalDate(r["Creado"]) ?? Date.now(),
+      tasks: [] as Record<string, unknown>[],
+    };
+    (parent["keyResults"] as Record<string, unknown>[]).push(kr);
+    if (text(r["Ref"])) krByRef.set(norm(text(r["Ref"])), kr);
+  }
+
+  for (const r of rows(wb, KR_TASK_SHEET) ?? []) {
+    const title = text(r["Tarea"]);
+    const kr = krByRef.get(norm(text(r["Ref KR"])));
+    if (!title || !kr) continue;
+    (kr["tasks"] as Record<string, unknown>[]).push({
+      title,
+      boardTaskTitle: text(r["Tarea del tablero"]) || title,
+      done: ["si", "sí", "true", "1", "x", "yes"].includes(norm(text(r["Hecha"]))),
+    });
+  }
+
+  return normalizeOkrs(objectives);
+}
+
 export type ImportedType = { label: string; hue: number; chroma: number };
 export type ImportResult = {
   board: BoardState;
   taskCount: number;
   moveCount: number;
   types: ImportedType[];
+  /** null = el archivo no trae OKRs y se conservan los actuales. */
+  okrs: Objective[] | null;
 };
 
 function historyByTitle(rows: Record<string, unknown>[]): Map<string, MoveEvent[]> {
@@ -288,5 +457,5 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
       'No se encontraron tareas válidas. El archivo debe tener columnas "Estado" y "Tarea".',
     );
 
-  return { board, taskCount, moveCount, types };
+  return { board, taskCount, moveCount, types, okrs: parseOkrSheets(wb) };
 }

@@ -12,7 +12,7 @@ import {
   ZAxis,
 } from "recharts";
 import { cn } from "@/lib/utils";
-import { krProgress, objectiveProgress, type Objective } from "@/lib/okr-cloud";
+import { krProgress, objectiveProgress, type Objective } from "@/lib/okrs";
 import {
   SMART_LETTERS,
   pacePoints,

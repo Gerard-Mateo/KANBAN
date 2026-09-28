@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { computeStats, formatDays, type BoardStats } from "@/lib/task-stats";
 import { computeFocus, formatMinutes, pacePoints, smartMatrix } from "@/lib/focus-stats";
 import { listSessions, type PomodoroSession } from "@/lib/pomodoro-cloud";
-import { loadOkrs, objectiveProgress, type Objective } from "@/lib/okr-cloud";
+import { objectiveProgress, useOkrs, type Objective } from "@/lib/okrs";
 import { ActivityCalendar } from "./ActivityCalendar";
 import { JuiceTubes } from "./JuiceTubes";
 import { FocusByType, FocusPunchCard, TomatoTower } from "./FocusCharts";
@@ -219,7 +219,7 @@ export function StatsPage({ board }: { board: BoardState }) {
 
   // Se piden al abrir la pestaña (el componente solo se monta entonces).
   const sessions = useRemote<PomodoroSession[]>(listSessions);
-  const okrs = useRemote<Objective[]>(loadOkrs);
+  const okrs = useOkrs();
 
   // Un punto por tarea: eje X = lo que tardó, eje Y = su tipo. Va todo en una
   // sola serie con <Cell> por punto: con varias <Scatter> el eje de categorías
@@ -450,11 +450,7 @@ export function StatsPage({ board }: { board: BoardState }) {
           title="OKRs y SMART"
           hint="Avance de cada objetivo, ritmo frente al plazo y calidad de los KRs."
         />
-        {okrs.data ? (
-          <OkrSection objectives={okrs.data} />
-        ) : (
-          <RemoteState remote={okrs} what="los OKRs" />
-        )}
+        <OkrSection objectives={okrs} />
       </section>
     </div>
   );

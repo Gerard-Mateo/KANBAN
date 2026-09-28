@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Download, FileSpreadsheet, FileText, History, Upload, FolderOpen } from "lucide-react";
 import { useBackdropClose } from "@/hooks/use-backdrop-close";
 import type { BoardState } from "@/lib/kanban-data";
+import type { Objective } from "@/lib/okrs";
 import {
   exportCsv,
   exportHistoryCsv,
@@ -16,7 +17,7 @@ export function FileMenu({
   onImport,
 }: {
   board: BoardState;
-  onImport: (board: BoardState, types: ImportedType[]) => void;
+  onImport: (board: BoardState, types: ImportedType[], okrs: Objective[] | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<{ result: ImportResult; name: string } | null>(null);
@@ -155,8 +156,11 @@ export function FileMenu({
                   <h2 className="text-base font-semibold text-foreground">Reemplazar tablero</h2>
                   <p className="mt-2 text-sm text-muted-foreground">
                     <span className="font-medium text-foreground">{pending.name}</span> contiene{" "}
-                    {pending.result.taskCount} tarea(s) y {pending.result.moveCount} movimiento(s).
-                    El tablero actual se reemplazará por completo.
+                    {pending.result.taskCount} tarea(s), {pending.result.moveCount} movimiento(s)
+                    {pending.result.okrs
+                      ? ` y ${pending.result.okrs.length} objetivo(s) OKR`
+                      : " (sin OKRs: se conservan los actuales)"}
+                    . El tablero actual se reemplazará por completo.
                   </p>
                   <div className="mt-4 flex justify-end gap-2">
                     <button
@@ -169,7 +173,7 @@ export function FileMenu({
                     <button
                       type="button"
                       onClick={() => {
-                        onImport(pending.result.board, pending.result.types);
+                        onImport(pending.result.board, pending.result.types, pending.result.okrs);
                         setPending(null);
                       }}
                       className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"

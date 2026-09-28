@@ -45,6 +45,7 @@ import {
 import { loadBoard, saveBoard } from "@/lib/tasks-cloud";
 import { saveBoardVersion } from "@/lib/local-save";
 import { ensureCustomType, upsertCustomType, useCustomTypes } from "@/lib/custom-types";
+import { replaceOkrs } from "@/lib/okrs";
 import { supabase } from "@/integrations/supabase/client";
 import { PomodoroPage } from "@/components/pomodoro/PomodoroPage";
 import { OkrPage } from "@/components/okr/OkrPage";
@@ -1013,8 +1014,9 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
               </button>
               <FileMenu
                 board={board}
-                onImport={(next, types) => {
+                onImport={(next, types, okrs) => {
                   for (const t of types) upsertCustomType(t.label, t);
+                  if (okrs) replaceOkrs(okrs);
                   registerBoardTypes(next);
                   setBoard(next);
                   setSelected(new Set());

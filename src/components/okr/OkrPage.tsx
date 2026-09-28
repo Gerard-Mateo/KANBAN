@@ -7,16 +7,15 @@ import {
   deleteKeyResult,
   deleteKrTask,
   deleteObjective,
-  loadOkrs,
   metricProgress,
   objectiveProgress,
   setKrTaskDone,
   taskProgress,
   updateKeyResult,
+  useOkrs,
   type KeyResult,
   type KeyResultInput,
-  type Objective,
-} from "@/lib/okr-cloud";
+} from "@/lib/okrs";
 
 const emptyKr: KeyResultInput = {
   title: "",
@@ -62,46 +61,31 @@ export function OkrPage({
   onStartPomodoro: (title: string) => void;
   onCompleteBoardTask: (title: string) => void;
 }) {
-  const [objectives, setObjectives] = useState<Objective[]>([]);
+  const objectives = useOkrs();
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [newObj, setNewObj] = useState({ title: "", description: "", period: "" });
   const [krFormFor, setKrFormFor] = useState<string | null>(null);
   const [krDraft, setKrDraft] = useState<KeyResultInput>(emptyKr);
 
-  const refresh = useCallback(async () => {
+  const run = useCallback(async (fn: () => Promise<void>) => {
     try {
-      setObjectives(await loadOkrs());
+      await fn();
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudieron cargar los OKRs");
-    } finally {
-      setLoading(false);
+      // No todos los errores son `Error` (p. ej. los de Supabase): se busca su
+      // mensaje para no esconder la causa real detrás de un texto genérico.
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: unknown }).message)
+          : "";
+      setError(msg || "Error al guardar");
     }
   }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const run = useCallback(
-    async (fn: () => Promise<void>) => {
-      try {
-        await fn();
-        await refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Error al guardar");
-      }
-    },
-    [refresh],
-  );
 
   const total = objectives.length;
   const globalProgress = useMemo(
     () =>
-      total
-        ? Math.round(objectives.reduce((a, o) => a + objectiveProgress(o), 0) / total)
-        : 0,
+      total ? Math.round(objectives.reduce((a, o) => a + objectiveProgress(o), 0) / total) : 0,
     [objectives, total],
   );
 
@@ -146,7 +130,7 @@ export function OkrPage({
             className={btnPrimary}
             onClick={() => {
               if (!newObj.title.trim()) return;
-              const payload = { ...newObj, title: newObj.title.trim(), position: total };
+              const payload = { ...newObj, title: newObj.title.trim() };
               setNewObj({ title: "", description: "", period: "" });
               void run(() => createObjective(payload));
             }}
@@ -157,10 +141,11 @@ export function OkrPage({
         </div>
       </div>
 
-      {loading && <p className="text-xs text-muted-foreground">Cargando OKRs…</p>}
-
       {objectives.map((obj) => (
-        <section key={obj.id} className="retro-shadow rounded-sm border-2 border-border bg-card p-4">
+        <section
+          key={obj.id}
+          className="retro-shadow rounded-sm border-2 border-border bg-card p-4"
+        >
           <header className="flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">
               <h3 className="font-display text-lg font-bold tracking-tight text-foreground">
@@ -303,9 +288,7 @@ export function OkrPage({
                       type="date"
                       className={box}
                       value={krDraft.dueDate ?? ""}
-                      onChange={(e) =>
-                        setKrDraft({ ...krDraft, dueDate: e.target.value || null })
-                      }
+                      onChange={(e) => setKrDraft({ ...krDraft, dueDate: e.target.value || null })}
                     />
                   </div>
                 </div>
@@ -315,10 +298,9 @@ export function OkrPage({
                   onClick={() => {
                     if (!krDraft.title.trim()) return;
                     const payload = { ...krDraft, title: krDraft.title.trim() };
-                    const pos = obj.keyResults.length;
                     setKrDraft(emptyKr);
                     setKrFormFor(null);
-                    void run(() => createKeyResult(obj.id, payload, pos));
+                    void run(() => createKeyResult(obj.id, payload));
                   }}
                 >
                   Guardar KR
@@ -341,7 +323,7 @@ export function OkrPage({
         </section>
       ))}
 
-      {!loading && objectives.length === 0 && (
+      {objectives.length === 0 && (
         <p className="text-sm text-muted-foreground">
           Aún no hay objetivos. Crea el primero arriba y luego añádele resultados clave SMART.
         </p>
@@ -398,7 +380,8 @@ function KeyResultCard({
           className="text-muted-foreground hover:text-destructive"
           title="Eliminar KR"
           onClick={() => {
-            if (confirm("¿Eliminar este resultado clave?")) void onRun(() => deleteKeyResult(kr.id));
+            if (confirm("¿Eliminar este resultado clave?"))
+              void onRun(() => deleteKeyResult(kr.id));
           }}
         >
           <Trash2 className="size-3.5" />
@@ -436,7 +419,9 @@ function KeyResultCard({
             <button
               type="button"
               className={btn}
-              onClick={() => void onRun(() => updateKeyResult(kr.id, { currentValue: Number(value) }))}
+              onClick={() =>
+                void onRun(() => updateKeyResult(kr.id, { currentValue: Number(value) }))
+              }
             >
               Actualizar
             </button>
@@ -506,7 +491,7 @@ function KeyResultCard({
                 if (!title) return;
                 setTaskTitle("");
                 if (!linkExisting && !boardTitles.includes(title)) onCreateBoardTask(title);
-                void onRun(() => createKrTask(kr.id, title, title, kr.tasks.length));
+                void onRun(() => createKrTask(kr.id, title, title));
               }}
             >
               Añadir
