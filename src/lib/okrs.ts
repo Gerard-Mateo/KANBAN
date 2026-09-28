@@ -13,6 +13,9 @@ export type KrTask = {
   position: number;
 };
 
+/** "up": más es mejor (ventas, videos). "down": menos es mejor (ranking, costos). */
+export type Direction = "up" | "down";
+
 export type KeyResult = {
   id: string;
   objectiveId: string;
@@ -26,6 +29,7 @@ export type KeyResult = {
   startValue: number;
   currentValue: number;
   targetValue: number;
+  direction: Direction;
   dueDate: string | null;
   position: number;
   /** Momento de creación (ms); es el arranque del plazo del KR. */
@@ -54,17 +58,22 @@ export type KeyResultInput = {
   startValue: number;
   currentValue: number;
   targetValue: number;
+  direction: Direction;
   dueDate: string | null;
 };
 
 /* ------------------------------- Progreso ------------------------------- */
 
-/** Progreso métrico del KR (0-100). */
+/** Progreso métrico del KR (0-100), en su dirección: subir hacia la meta o bajar hasta ella. */
 export function metricProgress(kr: KeyResult): number {
-  const span = kr.targetValue - kr.startValue;
-  if (span === 0) return kr.currentValue >= kr.targetValue ? 100 : 0;
-  const pct = ((kr.currentValue - kr.startValue) / span) * 100;
-  return Math.max(0, Math.min(100, Math.round(pct)));
+  const down = kr.direction === "down";
+  const total = down ? kr.startValue - kr.targetValue : kr.targetValue - kr.startValue;
+  if (total <= 0) {
+    const reached = down ? kr.currentValue <= kr.targetValue : kr.currentValue >= kr.targetValue;
+    return reached ? 100 : 0;
+  }
+  const gained = down ? kr.startValue - kr.currentValue : kr.currentValue - kr.startValue;
+  return Math.max(0, Math.min(100, Math.round((gained / total) * 100)));
 }
 
 /** Progreso por mini-tareas completadas (0-100), o null si no hay tareas. */
@@ -123,6 +132,9 @@ export function normalizeOkrs(raw: unknown): Objective[] {
             const krId = str(k["id"]) || newId();
             const tasks = Array.isArray(k["tasks"]) ? (k["tasks"] as unknown[]) : [];
             const due = k["dueDate"];
+            const startValue = num(k["startValue"], 0);
+            const targetValue = num(k["targetValue"], 100);
+            const dir = k["direction"];
             return {
               id: krId,
               objectiveId,
@@ -133,9 +145,16 @@ export function normalizeOkrs(raw: unknown): Objective[] {
               relevant: str(k["relevant"]),
               timeBound: str(k["timeBound"]),
               unit: str(k["unit"]),
-              startValue: num(k["startValue"], 0),
+              startValue,
               currentValue: num(k["currentValue"], 0),
-              targetValue: num(k["targetValue"], 100),
+              targetValue,
+              // Los KRs sin dirección guardada la deducen: meta por debajo del inicio = bajar.
+              direction:
+                dir === "up" || dir === "down"
+                  ? dir
+                  : startValue > targetValue
+                    ? ("down" as const)
+                    : ("up" as const),
               dueDate: typeof due === "string" && due ? due : null,
               position: ki,
               createdAt: num(k["createdAt"], Date.now()),

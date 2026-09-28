@@ -240,6 +240,7 @@ function appendOkrSheets(wb: XLSX.WorkBook, okrs: Objective[]) {
       Inicio: kr.startValue,
       Actual: kr.currentValue,
       Meta: kr.targetValue,
+      Dirección: kr.direction === "down" ? "Bajar" : "Subir",
       "Fecha límite": kr.dueDate ?? "",
       Creado: new Date(kr.createdAt).toLocaleString("es-EC"),
       "Avance %": krProgress(kr),
@@ -272,6 +273,7 @@ function appendOkrSheets(wb: XLSX.WorkBook, okrs: Objective[]) {
     { wch: 8 },
     { wch: 8 },
     { wch: 8 },
+    { wch: 9 },
     { wch: 13 },
     { wch: 20 },
     { wch: 9 },
@@ -313,6 +315,13 @@ function parseOkrSheets(wb: XLSX.WorkBook): Objective[] | null {
     const n = Number(v);
     return v === "" || !Number.isFinite(n) ? d : n;
   };
+  // Sin columna (o vacía) se deduce del inicio y la meta al normalizar.
+  const direction = (v: unknown) => {
+    const d = norm(v);
+    if (["bajar", "down", "menos", "menos es mejor"].includes(d)) return "down";
+    if (["subir", "up", "mas", "mas es mejor"].includes(d)) return "up";
+    return undefined;
+  };
 
   const byRef = new Map<string, Record<string, unknown>>();
   const byTitle = new Map<string, Record<string, unknown>>();
@@ -349,6 +358,7 @@ function parseOkrSheets(wb: XLSX.WorkBook): Objective[] | null {
       startValue: numOr(r["Inicio"], 0),
       currentValue: numOr(r["Actual"], 0),
       targetValue: numOr(r["Meta"], 100),
+      direction: direction(r["Dirección"]),
       dueDate: isoDay(r["Fecha límite"]),
       createdAt: parseLocalDate(r["Creado"]) ?? Date.now(),
       tasks: [] as Record<string, unknown>[],

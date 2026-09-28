@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Target, Timer, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Target, Timer, Trash2, X } from "lucide-react";
 import {
   createKeyResult,
   createKrTask,
@@ -28,8 +28,34 @@ const emptyKr: KeyResultInput = {
   startValue: 0,
   currentValue: 0,
   targetValue: 100,
+  direction: "up",
   dueDate: null,
 };
+
+// Los números van como texto mientras se edita para poder dejar un campo vacío.
+type KrDraft = Omit<KeyResultInput, "startValue" | "currentValue" | "targetValue"> & {
+  startValue: string;
+  currentValue: string;
+  targetValue: string;
+};
+
+const toDraft = (kr: KeyResultInput): KrDraft => ({
+  title: kr.title,
+  specific: kr.specific,
+  measurable: kr.measurable,
+  achievable: kr.achievable,
+  relevant: kr.relevant,
+  timeBound: kr.timeBound,
+  unit: kr.unit,
+  direction: kr.direction,
+  dueDate: kr.dueDate,
+  startValue: String(kr.startValue),
+  currentValue: String(kr.currentValue),
+  targetValue: String(kr.targetValue),
+});
+
+// Un KR nuevo arranca donde estás hoy: inicial vacío = el valor actual.
+const emptyDraft: KrDraft = { ...toDraft(emptyKr), startValue: "" };
 
 const box =
   "w-full rounded-sm border-2 border-border bg-card px-2 py-1.5 text-sm text-card-foreground outline-none focus:border-accent";
@@ -65,7 +91,6 @@ export function OkrPage({
   const [error, setError] = useState<string | null>(null);
   const [newObj, setNewObj] = useState({ title: "", description: "", period: "" });
   const [krFormFor, setKrFormFor] = useState<string | null>(null);
-  const [krDraft, setKrDraft] = useState<KeyResultInput>(emptyKr);
 
   const run = useCallback(async (fn: () => Promise<void>) => {
     try {
@@ -195,127 +220,20 @@ export function OkrPage({
           </div>
 
           {krFormFor === obj.id ? (
-            <div className="mt-4 rounded-sm border-2 border-dashed border-border p-3">
-              <div className="mb-2 flex items-center gap-2">
-                <span className="font-display text-xs font-bold uppercase tracking-widest">
-                  Nuevo resultado clave (SMART)
-                </span>
-                <button
-                  type="button"
-                  className="ml-auto text-muted-foreground hover:text-foreground"
-                  onClick={() => setKrFormFor(null)}
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-              <div className="grid gap-2">
-                <div>
-                  <span className={label}>Resultado clave</span>
-                  <input
-                    className={box}
-                    placeholder="Ej. Publicar 20 videos de módulos antes de junio"
-                    value={krDraft.title}
-                    onChange={(e) => setKrDraft({ ...krDraft, title: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {(
-                    [
-                      ["specific", "S · Específico", "¿Qué exactamente?"],
-                      ["measurable", "M · Medible", "¿Cómo se mide?"],
-                      ["achievable", "A · Alcanzable", "¿Con qué recursos?"],
-                      ["relevant", "R · Relevante", "¿Por qué importa?"],
-                      ["timeBound", "T · Con plazo", "¿Para cuándo?"],
-                    ] as const
-                  ).map(([key, text, ph]) => (
-                    <div key={key}>
-                      <span className={label}>{text}</span>
-                      <input
-                        className={box}
-                        placeholder={ph}
-                        value={krDraft[key]}
-                        onChange={(e) => setKrDraft({ ...krDraft, [key]: e.target.value })}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="grid gap-2 sm:grid-cols-5">
-                  <div>
-                    <span className={label}>Inicial</span>
-                    <input
-                      type="number"
-                      className={box}
-                      value={krDraft.startValue}
-                      onChange={(e) =>
-                        setKrDraft({ ...krDraft, startValue: Number(e.target.value) })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <span className={label}>Actual</span>
-                    <input
-                      type="number"
-                      className={box}
-                      value={krDraft.currentValue}
-                      onChange={(e) =>
-                        setKrDraft({ ...krDraft, currentValue: Number(e.target.value) })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <span className={label}>Meta</span>
-                    <input
-                      type="number"
-                      className={box}
-                      value={krDraft.targetValue}
-                      onChange={(e) =>
-                        setKrDraft({ ...krDraft, targetValue: Number(e.target.value) })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <span className={label}>Unidad</span>
-                    <input
-                      className={box}
-                      placeholder="videos, %, USD"
-                      value={krDraft.unit}
-                      onChange={(e) => setKrDraft({ ...krDraft, unit: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <span className={label}>Fecha límite</span>
-                    <input
-                      type="date"
-                      className={box}
-                      value={krDraft.dueDate ?? ""}
-                      onChange={(e) => setKrDraft({ ...krDraft, dueDate: e.target.value || null })}
-                    />
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className={`${btnPrimary} justify-self-start`}
-                  onClick={() => {
-                    if (!krDraft.title.trim()) return;
-                    const payload = { ...krDraft, title: krDraft.title.trim() };
-                    setKrDraft(emptyKr);
-                    setKrFormFor(null);
-                    void run(() => createKeyResult(obj.id, payload));
-                  }}
-                >
-                  Guardar KR
-                </button>
-              </div>
+            <div className="mt-4">
+              <KrForm
+                initial={emptyDraft}
+                heading="Nuevo resultado clave (SMART)"
+                submitLabel="Guardar KR"
+                onCancel={() => setKrFormFor(null)}
+                onSubmit={(input) => {
+                  setKrFormFor(null);
+                  void run(() => createKeyResult(obj.id, input));
+                }}
+              />
             </div>
           ) : (
-            <button
-              type="button"
-              className={`${btn} mt-4`}
-              onClick={() => {
-                setKrDraft(emptyKr);
-                setKrFormFor(obj.id);
-              }}
-            >
+            <button type="button" className={`${btn} mt-4`} onClick={() => setKrFormFor(obj.id)}>
               <Plus className="mr-1 inline size-3" />
               Resultado clave
             </button>
@@ -350,11 +268,27 @@ function KeyResultCard({
   const [value, setValue] = useState(String(kr.currentValue));
   const [taskTitle, setTaskTitle] = useState("");
   const [linkExisting, setLinkExisting] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => setValue(String(kr.currentValue)), [kr.currentValue]);
 
+  if (editing)
+    return (
+      <KrForm
+        initial={toDraft(kr)}
+        heading="Editar resultado clave"
+        submitLabel="Guardar cambios"
+        onCancel={() => setEditing(false)}
+        onSubmit={(input) => {
+          setEditing(false);
+          void onRun(() => updateKeyResult(kr.id, input));
+        }}
+      />
+    );
+
   const mp = metricProgress(kr);
   const tp = taskProgress(kr);
+  const down = kr.direction === "down";
 
   const smart = (
     [
@@ -375,6 +309,14 @@ function KeyResultCard({
             {kr.dueDate}
           </span>
         )}
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground"
+          title="Editar KR"
+          onClick={() => setEditing(true)}
+        >
+          <Pencil className="size-3.5" />
+        </button>
         <button
           type="button"
           className="text-muted-foreground hover:text-destructive"
@@ -403,9 +345,14 @@ function KeyResultCard({
         <div>
           <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
             Métrica
-            <span className="text-foreground">
-              {kr.currentValue} / {kr.targetValue} {kr.unit}
+            <span
+              className="inline-flex items-center gap-1 text-foreground"
+              title={down ? "Menos es mejor: el avance crece al bajar" : "Más es mejor"}
+            >
+              {down ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}
+              {kr.currentValue} {down ? "→" : "/"} {kr.targetValue} {kr.unit}
             </span>
+            <span>desde {kr.startValue}</span>
             <span className="ml-auto">{mp}%</span>
           </div>
           <Bar value={mp} tone="accent" />
@@ -505,6 +452,211 @@ function KeyResultCard({
             {linkExisting ? "→ Crear tarea nueva" : "→ Vincular tarea existente"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+const DIRECTIONS = [
+  { dir: "up", Icon: ArrowUp, text: "Más es mejor", hint: "ventas, videos, clientes" },
+  { dir: "down", Icon: ArrowDown, text: "Menos es mejor", hint: "ranking, costos, tiempos" },
+] as const;
+
+function KrForm({
+  initial,
+  heading,
+  submitLabel,
+  onSubmit,
+  onCancel,
+}: {
+  initial: KrDraft;
+  heading: string;
+  submitLabel: string;
+  onSubmit: (input: KeyResultInput) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const set = (patch: Partial<KrDraft>) => setDraft((d) => ({ ...d, ...patch }));
+
+  const num = (v: string, fallback: number) => {
+    const n = Number(v);
+    return v.trim() === "" || !Number.isFinite(n) ? fallback : n;
+  };
+  const current = num(draft.currentValue, 0);
+  const start = num(draft.startValue, current);
+  const target = num(draft.targetValue, 100);
+  const down = draft.direction === "down";
+
+  // La meta tiene que quedar del lado correcto del inicio; si no, el avance no tiene sentido.
+  const wrongSide = down ? target > start : target < start;
+  const problem =
+    target === start
+      ? "La meta tiene que ser distinta del valor inicial."
+      : wrongSide
+        ? down
+          ? `Para bajar, la meta (${target}) debe quedar por debajo del inicio (${start}).`
+          : `La meta (${target}) está por debajo del inicio (${start}): eso es bajar.`
+        : null;
+
+  return (
+    <div className="rounded-sm border-2 border-dashed border-border p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="font-display text-xs font-bold uppercase tracking-widest">{heading}</span>
+        <button
+          type="button"
+          className="ml-auto text-muted-foreground hover:text-foreground"
+          title="Cancelar"
+          onClick={onCancel}
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+      <div className="grid gap-2">
+        <div>
+          <span className={label}>Resultado clave</span>
+          <input
+            className={box}
+            placeholder="Ej. Publicar 20 videos de módulos antes de junio"
+            value={draft.title}
+            onChange={(e) => set({ title: e.target.value })}
+          />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(
+            [
+              ["specific", "S · Específico", "¿Qué exactamente?"],
+              ["measurable", "M · Medible", "¿Cómo se mide?"],
+              ["achievable", "A · Alcanzable", "¿Con qué recursos?"],
+              ["relevant", "R · Relevante", "¿Por qué importa?"],
+              ["timeBound", "T · Con plazo", "¿Para cuándo?"],
+            ] as const
+          ).map(([key, text, ph]) => (
+            <div key={key}>
+              <span className={label}>{text}</span>
+              <input
+                className={box}
+                placeholder={ph}
+                value={draft[key]}
+                onChange={(e) => set({ [key]: e.target.value })}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div>
+          <span className={label}>Dirección de la métrica</span>
+          <div className="mt-0.5 flex flex-wrap items-center gap-3">
+            <div
+              role="radiogroup"
+              aria-label="Dirección de la métrica"
+              className="inline-flex overflow-hidden rounded-sm border-2 border-border"
+            >
+              {DIRECTIONS.map(({ dir, Icon, text }) => (
+                <button
+                  key={dir}
+                  type="button"
+                  role="radio"
+                  aria-checked={draft.direction === dir}
+                  onClick={() => set({ direction: dir })}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold uppercase transition-colors ${
+                    draft.direction === dir
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Icon className="size-3" /> {text}
+                </button>
+              ))}
+            </div>
+            <span className="text-[11px] text-muted-foreground">
+              Ej. {DIRECTIONS.find((d) => d.dir === draft.direction)?.hint}
+              {down ? ": el avance crece mientras el número baja." : "."}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-5">
+          <div>
+            <span className={label}>Inicial</span>
+            <input
+              type="number"
+              className={box}
+              placeholder={`= actual (${current})`}
+              value={draft.startValue}
+              onChange={(e) => set({ startValue: e.target.value })}
+            />
+          </div>
+          <div>
+            <span className={label}>Actual</span>
+            <input
+              type="number"
+              className={box}
+              value={draft.currentValue}
+              onChange={(e) => set({ currentValue: e.target.value })}
+            />
+          </div>
+          <div>
+            <span className={label}>Meta</span>
+            <input
+              type="number"
+              className={box}
+              value={draft.targetValue}
+              onChange={(e) => set({ targetValue: e.target.value })}
+            />
+          </div>
+          <div>
+            <span className={label}>Unidad</span>
+            <input
+              className={box}
+              placeholder="videos, %, USD"
+              value={draft.unit}
+              onChange={(e) => set({ unit: e.target.value })}
+            />
+          </div>
+          <div>
+            <span className={label}>Fecha límite</span>
+            <input
+              type="date"
+              className={box}
+              value={draft.dueDate ?? ""}
+              onChange={(e) => set({ dueDate: e.target.value || null })}
+            />
+          </div>
+        </div>
+
+        {problem && (
+          <p className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-destructive">
+            ⚠︎ {problem}
+            {wrongSide && (
+              <button
+                type="button"
+                className={btn}
+                onClick={() => set({ direction: down ? "up" : "down" })}
+              >
+                {down ? "Usar ↑ Más es mejor" : "Usar ↓ Menos es mejor"}
+              </button>
+            )}
+          </p>
+        )}
+
+        <button
+          type="button"
+          disabled={!!problem}
+          className={`${btnPrimary} justify-self-start disabled:cursor-not-allowed disabled:opacity-50`}
+          onClick={() => {
+            const title = draft.title.trim();
+            if (!title) return;
+            onSubmit({
+              ...draft,
+              title,
+              startValue: start,
+              currentValue: current,
+              targetValue: target,
+            });
+          }}
+        >
+          {submitLabel}
+        </button>
       </div>
     </div>
   );
