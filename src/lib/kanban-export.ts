@@ -235,7 +235,6 @@ function appendOkrSheets(wb: XLSX.WorkBook, okrs: Objective[]) {
       Medible: kr.measurable,
       Alcanzable: kr.achievable,
       Relevante: kr.relevant,
-      "Con plazo": kr.timeBound,
       Unidad: kr.unit,
       Inicio: kr.startValue,
       Actual: kr.currentValue,
@@ -268,7 +267,7 @@ function appendOkrSheets(wb: XLSX.WorkBook, okrs: Objective[]) {
     { wch: 9 },
     { wch: 12 },
     { wch: 44 },
-    ...Array.from({ length: 5 }, () => ({ wch: 30 })),
+    ...Array.from({ length: 4 }, () => ({ wch: 30 })),
     { wch: 10 },
     { wch: 8 },
     { wch: 8 },
@@ -298,6 +297,11 @@ function isoDay(value: unknown): string | null {
   const t = parseLocalDate(s);
   return t === undefined ? null : isoDay(new Date(t));
 }
+
+const strictDate = (v: unknown) =>
+  v instanceof Date ||
+  typeof v === "number" ||
+  /^(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4})$/.test(String(v ?? "").trim());
 
 const rows = (wb: XLSX.WorkBook, name: string) => {
   const sheet = wb.SheetNames.find((n) => norm(n) === norm(name));
@@ -353,13 +357,15 @@ function parseOkrSheets(wb: XLSX.WorkBook): Objective[] | null {
       measurable: text(r["Medible"]),
       achievable: text(r["Alcanzable"]),
       relevant: text(r["Relevante"]),
-      timeBound: text(r["Con plazo"]),
       unit: text(r["Unidad"]),
       startValue: numOr(r["Inicio"], 0),
       currentValue: numOr(r["Actual"], 0),
       targetValue: numOr(r["Meta"], 100),
       direction: direction(r["Dirección"]),
-      dueDate: isoDay(r["Fecha límite"]),
+      // Los Excel viejos traían una columna "Con plazo" de texto libre: solo
+      // vale si es una fecha de verdad, no "fin de año".
+      dueDate:
+        isoDay(r["Fecha límite"]) ?? (strictDate(r["Con plazo"]) ? isoDay(r["Con plazo"]) : null),
       createdAt: parseLocalDate(r["Creado"]) ?? Date.now(),
       tasks: [] as Record<string, unknown>[],
     };

@@ -23,7 +23,6 @@ const emptyKr: KeyResultInput = {
   measurable: "",
   achievable: "",
   relevant: "",
-  timeBound: "",
   unit: "",
   startValue: 0,
   currentValue: 0,
@@ -45,7 +44,6 @@ const toDraft = (kr: KeyResultInput): KrDraft => ({
   measurable: kr.measurable,
   achievable: kr.achievable,
   relevant: kr.relevant,
-  timeBound: kr.timeBound,
   unit: kr.unit,
   direction: kr.direction,
   dueDate: kr.dueDate,
@@ -296,7 +294,7 @@ function KeyResultCard({
       ["M", kr.measurable],
       ["A", kr.achievable],
       ["R", kr.relevant],
-      ["T", kr.timeBound],
+      ["T", kr.dueDate ? deadlineText(kr.dueDate) : ""],
     ] as const
   ).filter(([, v]) => v.trim());
 
@@ -304,11 +302,6 @@ function KeyResultCard({
     <div className="rounded-sm border-2 border-border bg-background/40 p-3">
       <div className="flex flex-wrap items-start gap-2">
         <p className="min-w-0 flex-1 text-sm font-semibold text-foreground">{kr.title}</p>
-        {kr.dueDate && (
-          <span className="rounded-sm border-2 border-border px-1.5 py-0.5 text-[10px] font-bold uppercase text-muted-foreground">
-            {kr.dueDate}
-          </span>
-        )}
         <button
           type="button"
           className="text-muted-foreground hover:text-foreground"
@@ -457,6 +450,20 @@ function KeyResultCard({
   );
 }
 
+/** "15 ene 2027 · quedan 109 día(s)": la T del KR en la tarjeta. */
+function deadlineText(iso: string) {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  const due = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+  const date = due.toLocaleDateString("es", { day: "numeric", month: "short", year: "numeric" });
+  const left =
+    days < 0 ? `venció hace ${-days} día(s)` : days === 0 ? "vence hoy" : `quedan ${days} día(s)`;
+  return `${date} · ${left}`;
+}
+
 const DIRECTIONS = [
   { dir: "up", Icon: ArrowUp, text: "Más es mejor", hint: "ventas, videos, clientes" },
   { dir: "down", Icon: ArrowDown, text: "Menos es mejor", hint: "ranking, costos, tiempos" },
@@ -528,7 +535,6 @@ function KrForm({
               ["measurable", "M · Medible", "¿Cómo se mide?"],
               ["achievable", "A · Alcanzable", "¿Con qué recursos?"],
               ["relevant", "R · Relevante", "¿Por qué importa?"],
-              ["timeBound", "T · Con plazo", "¿Para cuándo?"],
             ] as const
           ).map(([key, text, ph]) => (
             <div key={key}>
@@ -541,6 +547,15 @@ function KrForm({
               />
             </div>
           ))}
+          <div>
+            <span className={label}>T · Con plazo (fecha límite)</span>
+            <input
+              type="date"
+              className={box}
+              value={draft.dueDate ?? ""}
+              onChange={(e) => set({ dueDate: e.target.value || null })}
+            />
+          </div>
         </div>
 
         <div>
@@ -575,7 +590,7 @@ function KrForm({
           </div>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-5">
+        <div className="grid gap-2 sm:grid-cols-4">
           <div>
             <span className={label}>Inicial</span>
             <input
@@ -611,15 +626,6 @@ function KrForm({
               placeholder="videos, %, USD"
               value={draft.unit}
               onChange={(e) => set({ unit: e.target.value })}
-            />
-          </div>
-          <div>
-            <span className={label}>Fecha límite</span>
-            <input
-              type="date"
-              className={box}
-              value={draft.dueDate ?? ""}
-              onChange={(e) => set({ dueDate: e.target.value || null })}
             />
           </div>
         </div>

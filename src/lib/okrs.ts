@@ -24,12 +24,12 @@ export type KeyResult = {
   measurable: string;
   achievable: string;
   relevant: string;
-  timeBound: string;
   unit: string;
   startValue: number;
   currentValue: number;
   targetValue: number;
   direction: Direction;
+  /** La "T" de SMART: fecha límite (AAAA-MM-DD). */
   dueDate: string | null;
   position: number;
   /** Momento de creación (ms); es el arranque del plazo del KR. */
@@ -53,7 +53,6 @@ export type KeyResultInput = {
   measurable: string;
   achievable: string;
   relevant: string;
-  timeBound: string;
   unit: string;
   startValue: number;
   currentValue: number;
@@ -143,7 +142,6 @@ export function normalizeOkrs(raw: unknown): Objective[] {
               measurable: str(k["measurable"]),
               achievable: str(k["achievable"]),
               relevant: str(k["relevant"]),
-              timeBound: str(k["timeBound"]),
               unit: str(k["unit"]),
               startValue,
               currentValue: num(k["currentValue"], 0),

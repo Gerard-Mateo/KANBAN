@@ -212,7 +212,7 @@ export const SMART_LETTERS = [
   { key: "measurable", letter: "M", name: "Medible" },
   { key: "achievable", letter: "A", name: "Alcanzable" },
   { key: "relevant", letter: "R", name: "Relevante" },
-  { key: "timeBound", letter: "T", name: "Con plazo" },
+  { key: "dueDate", letter: "T", name: "Con plazo" },
 ] as const;
 
 export type SmartRow = {
@@ -228,10 +228,8 @@ export function smartMatrix(objectives: Objective[]) {
   const rows: SmartRow[] = [];
   for (const obj of objectives) {
     for (const kr of obj.keyResults) {
-      // "T" también cuenta si el KR tiene fecha límite aunque el texto esté vacío.
-      const filled = SMART_LETTERS.map(
-        ({ key }) => kr[key].trim().length > 0 || (key === "timeBound" && !!kr.dueDate),
-      );
+      // "T" es la fecha límite.
+      const filled = SMART_LETTERS.map(({ key }) => (kr[key] ?? "").trim().length > 0);
       rows.push({
         id: kr.id,
         title: kr.title,
