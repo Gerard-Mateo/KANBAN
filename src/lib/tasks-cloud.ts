@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { USE_LOCAL_MYSQL, localApi } from "./local-db";
 import {
   COLUMNS,
   type BoardState,
@@ -10,15 +11,29 @@ import {
 
 const emptyBoard = (): BoardState => ({ todo: [], doing: [], done: [] });
 
-export async function loadBoard(): Promise<BoardState> {
+type TaskRow = {
+  id: string;
+  title: string | null;
+  column_id: string;
+  position: number;
+  type: string | null;
+  history: unknown;
+  created_at: string | null;
+};
+
+async function fetchTaskRows(): Promise<TaskRow[]> {
+  if (USE_LOCAL_MYSQL) return localApi<TaskRow[]>("GET", "/tasks");
   const { data, error } = await supabase
     .from("tasks")
     .select("id, title, column_id, position, type, history, created_at")
     .order("position", { ascending: true });
   if (error) throw error;
+  return data ?? [];
+}
 
+export async function loadBoard(): Promise<BoardState> {
   const board = emptyBoard();
-  for (const row of data ?? []) {
+  for (const row of await fetchTaskRows()) {
     const col = row.column_id as ColumnId;
     if (!board[col]) continue;
     const task: Task = {
@@ -34,6 +49,7 @@ export async function loadBoard(): Promise<BoardState> {
 }
 
 export async function countTasks(): Promise<number> {
+  if (USE_LOCAL_MYSQL) return (await fetchTaskRows()).length;
   const { count, error } = await supabase
     .from("tasks")
     .select("id", { count: "exact", head: true });
@@ -55,6 +71,10 @@ export async function saveBoard(userId: string, board: BoardState): Promise<void
     })),
   );
 
+  if (USE_LOCAL_MYSQL) {
+    await localApi("PUT", "/tasks", { user_id: userId, rows });
+    return;
+  }
   const { error: delError } = await supabase.from("tasks").delete().eq("user_id", userId);
   if (delError) throw delError;
   if (rows.length === 0) return;

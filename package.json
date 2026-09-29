@@ -9,7 +9,11 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "dev:mysql": "node mysql/dev.mjs",
+    "db:up": "docker compose -f mysql/docker-compose.yml up -d",
+    "db:down": "docker compose -f mysql/docker-compose.yml down",
+    "db:api": "node mysql/server.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -84,6 +88,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
+    "mysql2": "~3.24.4",
     "nitro": "3.0.260603-beta",
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",

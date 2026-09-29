@@ -88,6 +88,26 @@ VITE_SUPABASE_URL=...
 VITE_SUPABASE_PUBLISHABLE_KEY=...
 ```
 
+### MySQL local (sin Supabase)
+
+Para trabajar todo en tu máquina, con tareas y pomodoros en un MySQL local y sin
+iniciar sesión. Necesitas Docker.
+
+```sh
+npm run db:up       # MySQL 8.4 en localhost:3307 (usuario/clave/base: kanban)
+npm run dev:mysql   # API local (localhost:8787) + app en modo MySQL
+```
+
+- El esquema está en `mysql/init/01-schema.sql` y se crea solo la primera vez.
+- Los datos viven en el volumen de Docker `kanban-mysql-data`; `npm run db:down`
+  apaga MySQL sin borrarlos (`docker compose -f mysql/docker-compose.yml down -v`
+  sí los borra).
+- ¿Ya tienes MySQL instalado? Crea la base, corre el `.sql` y apunta la API a él:
+  `MYSQL_URL=mysql://usuario:clave@127.0.0.1:3306/kanban npm run dev:mysql`.
+- Si la base está vacía, el tablero de este navegador se sube solo al abrirla,
+  igual que con Supabase. Los OKRs y los tipos propios siguen en el navegador.
+- `npm run dev` sigue usando Supabase como siempre.
+
 Otros comandos:
 
 ```sh

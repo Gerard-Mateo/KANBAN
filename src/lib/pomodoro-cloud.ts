@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { USE_LOCAL_MYSQL, localApi } from "./local-db";
 
 export type PomodoroSession = {
   id: string;
@@ -19,14 +20,29 @@ export type TaskStat = {
   taskDone: boolean;
 };
 
-export async function listSessions(): Promise<PomodoroSession[]> {
+type SessionRow = {
+  id: string;
+  task_title: string | null;
+  duration_minutes: number | null;
+  completed: boolean | number;
+  task_done: boolean | number;
+  started_at: string;
+  ended_at: string | null;
+};
+
+async function fetchSessionRows(): Promise<SessionRow[]> {
+  if (USE_LOCAL_MYSQL) return localApi<SessionRow[]>("GET", "/pomodoro");
   const { data, error } = await supabase
     .from("pomodoro_sessions")
     .select("id, task_title, duration_minutes, completed, task_done, started_at, ended_at")
     .order("started_at", { ascending: false })
     .limit(500);
   if (error) throw error;
-  return (data ?? []).map((row) => ({
+  return data ?? [];
+}
+
+export async function listSessions(): Promise<PomodoroSession[]> {
+  return (await fetchSessionRows()).map((row) => ({
     id: row.id,
     taskTitle: row.task_title ?? "",
     durationMinutes: row.duration_minutes ?? 25,
@@ -42,6 +58,14 @@ export async function startSession(
   taskTitle: string,
   durationMinutes: number,
 ): Promise<string> {
+  if (USE_LOCAL_MYSQL) {
+    const { id } = await localApi<{ id: string }>("POST", "/pomodoro", {
+      user_id: userId,
+      task_title: taskTitle,
+      duration_minutes: durationMinutes,
+    });
+    return id;
+  }
   const { data, error } = await supabase
     .from("pomodoro_sessions")
     .insert({
@@ -61,6 +85,13 @@ export async function completeSession(
   actualMinutes?: number,
   taskDone?: boolean,
 ): Promise<void> {
+  if (USE_LOCAL_MYSQL) {
+    await localApi("PATCH", `/pomodoro/${sessionId}`, {
+      duration_minutes: actualMinutes,
+      task_done: taskDone,
+    });
+    return;
+  }
   const { error } = await supabase
     .from("pomodoro_sessions")
     .update({
@@ -74,6 +105,10 @@ export async function completeSession(
 }
 
 export async function cancelSession(sessionId: string): Promise<void> {
+  if (USE_LOCAL_MYSQL) {
+    await localApi("DELETE", `/pomodoro/${sessionId}`);
+    return;
+  }
   const { error } = await supabase.from("pomodoro_sessions").delete().eq("id", sessionId);
   if (error) throw error;
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
+import { LOCAL_USER_ID, USE_LOCAL_MYSQL } from "@/lib/local-db";
 
 type Mode = "signin" | "signup";
 
@@ -25,6 +26,7 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
   const triedDevAutoLogin = useRef(false);
 
   useEffect(() => {
+    if (USE_LOCAL_MYSQL) return;
     (async () => {
       const { data } = await supabase.auth.getSession();
       setSession(data.session);
@@ -39,6 +41,11 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  // MySQL local: un solo usuario en tu máquina, sin cuentas.
+  if (USE_LOCAL_MYSQL) {
+    return <>{children({ user: { id: LOCAL_USER_ID, email: "local@mysql" } } as Session)}</>;
+  }
 
   if (!ready) {
     return (
