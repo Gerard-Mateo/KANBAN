@@ -24,6 +24,8 @@ export function Column({
   onTaskSelect,
   onBulkCreate,
   onCreateWithDetails,
+  onTaskOpen,
+  onTaskGoalStep,
 }: {
   id: ColumnId;
   title: string;
@@ -35,6 +37,8 @@ export function Column({
   onTaskContextMenu?: ((task: Task, e: React.MouseEvent) => void) | undefined;
   selectedIds?: Set<string> | undefined;
   onTaskSelect?: ((task: Task, e: React.MouseEvent) => void) | undefined;
+  onTaskOpen?: ((task: Task) => void) | undefined;
+  onTaskGoalStep?: ((task: Task, delta: 1 | -1) => void) | undefined;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id, data: { type: "column" } });
   const [composing, setComposing] = useState(false);
@@ -97,6 +101,8 @@ export function Column({
                 onContextMenu={onTaskContextMenu}
                 selected={selectedIds?.has(task.id) ?? false}
                 onSelect={onTaskSelect}
+                onOpen={onTaskOpen}
+                onGoalStep={onTaskGoalStep}
               />
             </div>
           ))}

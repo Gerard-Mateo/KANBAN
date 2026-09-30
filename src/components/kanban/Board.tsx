@@ -18,12 +18,15 @@ import {
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { AlertTriangle, Check, LogOut, Loader2, Save } from "lucide-react";
 import {
+  clampGoal,
+  columnForGoal,
   COLUMNS,
   initialBoard,
   tagsForTask,
   type BoardState,
   type ColumnId,
   type Task,
+  type TaskGoal,
 } from "@/lib/kanban-data";
 import { Column } from "./Column";
 import { TaskCardBody } from "./TaskCard";
@@ -366,6 +369,44 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
       return new Set([task.id]);
     });
   }, []);
+
+  const handleTaskOpen = useCallback((task: Task) => {
+    setSelected(new Set([task.id]));
+    setDetailsId(task.id);
+  }, []);
+
+  // Cambia la meta de una tarea y la mueve a la columna que le toca:
+  // al sumar el primero pasa a En Progreso y al cumplir la meta a Hecho.
+  const handleGoalChange = useCallback((id: string, goal: TaskGoal | undefined) => {
+    setBoard((prev) => {
+      const from = findColumn(prev, id);
+      const task = from && prev[from].find((t) => t.id === id);
+      if (!from || !task) return prev;
+      if (!goal) {
+        const { goal: _removed, ...rest } = task;
+        return { ...prev, [from]: prev[from].map((t) => (t.id === id ? rest : t)) };
+      }
+      const next = clampGoal(goal);
+      const to = columnForGoal(next, from);
+      const updated = { ...task, goal: next };
+      if (to === from) {
+        return { ...prev, [from]: prev[from].map((t) => (t.id === id ? updated : t)) };
+      }
+      return {
+        ...prev,
+        [from]: prev[from].filter((t) => t.id !== id),
+        [to]: [...prev[to], logMove(updated, from, to)],
+      };
+    });
+  }, []);
+
+  const handleGoalStep = useCallback(
+    (task: Task, delta: 1 | -1) => {
+      if (task.goal)
+        handleGoalChange(task.id, { ...task.goal, current: task.goal.current + delta });
+    },
+    [handleGoalChange],
+  );
 
   const handleTaskContextMenu = useCallback((task: Task, e: React.MouseEvent) => {
     setMenu({ x: e.clientX, y: e.clientY, taskId: task.id });
@@ -1153,6 +1194,8 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
                   selectedIds={selected}
                   onTaskSelect={handleTaskSelect}
                   onTaskContextMenu={handleTaskContextMenu}
+                  onTaskOpen={handleTaskOpen}
+                  onTaskGoalStep={handleGoalStep}
                 />
               ))}
             </div>
@@ -1283,6 +1326,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         column={findTask(detailsId)?.col}
         onClose={() => setDetailsId(null)}
         onSave={(patch) => detailsId && handleUpdate(detailsId, patch)}
+        onGoalChange={(goal) => detailsId && handleGoalChange(detailsId, goal)}
         onMove={(to) => detailsId && handleMove(detailsId, to)}
         onDelete={() => detailsId && handleDelete(detailsId)}
       />

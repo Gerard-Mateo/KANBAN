@@ -12,7 +12,24 @@ export type Task = {
   createdAt?: number | undefined;
   type?: TagTone | undefined;
   history?: MoveEvent[] | undefined;
+  goal?: TaskGoal | undefined;
 };
+
+/** Meta medible opcional: "3 de 10 blogs". */
+export type TaskGoal = { target: number; current: number };
+
+export function clampGoal(goal: TaskGoal): TaskGoal {
+  const target = Math.max(1, Math.round(goal.target) || 1);
+  return { target, current: Math.min(target, Math.max(0, Math.round(goal.current) || 0)) };
+}
+
+/** Columna que le toca a una tarea según su avance: al empezar pasa a En
+ * Progreso, al cumplir la meta a Hecho, y si baja de la meta sale de Hecho. */
+export function columnForGoal(goal: TaskGoal, col: ColumnId): ColumnId {
+  if (goal.current >= goal.target) return "done";
+  if (goal.current > 0) return "doing";
+  return col === "done" ? "todo" : col;
+}
 
 export type BuiltinTone = "video" | "guion" | "module" | "other";
 

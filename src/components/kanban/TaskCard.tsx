@@ -1,10 +1,10 @@
 import { memo } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, GripVertical } from "lucide-react";
+import { Check, GripVertical, Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { tagsForTask, type Task } from "@/lib/kanban-data";
-import { typeChipStyle, useCustomTypes } from "@/lib/custom-types";
+import { tagsForTask, type Task, type TaskGoal } from "@/lib/kanban-data";
+import { colorOf, typeChipStyle, useCustomTypes, type CustomType } from "@/lib/custom-types";
 
 // Solo los tipos neutros llevan clase fija; el resto (incluidos Video y Guion)
 // se pinta con su propio tono para que cada tipo se distinga.
@@ -13,16 +13,118 @@ const toneClass: Record<string, string> = {
   other: "bg-secondary text-muted-foreground",
 };
 
+// Los clics en los botones de la meta no deben seleccionar, arrastrar ni abrir la tarea.
+const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
+/** Colores de la barra: el tono del tipo, o el color principal si el tipo es neutro. */
+function barColors(tone: string | undefined, customTypes: CustomType[]) {
+  if (!tone || toneClass[tone]) {
+    return {
+      fill: "linear-gradient(90deg, color-mix(in oklch, var(--primary) 55%, transparent), var(--primary))",
+      glow: "color-mix(in oklch, var(--primary) 45%, transparent)",
+      track: "color-mix(in oklch, var(--primary) 14%, transparent)",
+      text: "var(--primary)",
+    };
+  }
+  const { hue, chroma } = colorOf(tone, customTypes);
+  return {
+    fill: `linear-gradient(90deg, oklch(0.52 ${chroma} ${hue}), oklch(0.76 ${chroma} ${hue}))`,
+    glow: `oklch(0.72 ${chroma} ${hue} / 0.45)`,
+    track: `oklch(0.32 ${(chroma * 0.45).toFixed(4)} ${hue} / 0.55)`,
+    text: `oklch(0.84 ${chroma} ${hue})`,
+  };
+}
+
+function GoalBar({
+  goal,
+  tone,
+  onStep,
+}: {
+  goal: TaskGoal;
+  tone: string | undefined;
+  onStep?: ((delta: 1 | -1) => void) | undefined;
+}) {
+  const customTypes = useCustomTypes();
+  const c = barColors(tone, customTypes);
+  const pct = Math.min(100, (goal.current / goal.target) * 100);
+  const complete = goal.current >= goal.target;
+  const stepButton =
+    "grid size-5 place-items-center rounded-full border border-border/60 text-muted-foreground transition-[color,border-color,opacity] hover:border-foreground/40 hover:text-foreground";
+  const guard = {
+    onPointerDown: stop,
+    onKeyDown: stop,
+    onDoubleClick: stop,
+    onContextMenu: stop,
+  };
+  return (
+    <div className="mt-3 flex items-center gap-2.5">
+      <div
+        className="relative h-[3px] flex-1 overflow-hidden rounded-full"
+        style={{ background: c.track }}
+      >
+        <div
+          className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out"
+          style={{
+            width: `${pct}%`,
+            background: c.fill,
+            boxShadow: complete ? `0 0 10px ${c.glow}` : `0 0 6px ${c.glow}`,
+          }}
+        />
+      </div>
+      <span
+        className="text-[11px] font-semibold tabular-nums tracking-tight"
+        style={{ color: c.text }}
+      >
+        {goal.current}
+        <span className="font-medium text-muted-foreground">/{goal.target}</span>
+      </span>
+      {onStep && (
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="Restar uno"
+            disabled={goal.current === 0}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStep(-1);
+            }}
+            {...guard}
+            className={cn(stepButton, "opacity-0 group-hover:opacity-100 disabled:!opacity-0")}
+          >
+            <Minus className="size-3" strokeWidth={2.5} />
+          </button>
+          <button
+            type="button"
+            aria-label="Sumar uno"
+            disabled={complete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStep(1);
+            }}
+            {...guard}
+            className={cn(stepButton, "disabled:opacity-30")}
+          >
+            <Plus className="size-3" strokeWidth={2.5} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TaskCardBody({
   task,
   dragging,
   selected,
+  onGoalStep,
 }: {
   task: Task;
   dragging?: boolean;
   selected?: boolean;
+  onGoalStep?: ((task: Task, delta: 1 | -1) => void) | undefined;
 }) {
   const customTypes = useCustomTypes();
+  const tags = tagsForTask(task);
   return (
     <div
       className={cn(
@@ -42,7 +144,7 @@ export function TaskCardBody({
       <div className="min-w-0 flex-1">
         <p className="cursor-default text-sm leading-snug text-card-foreground">{task.title}</p>
         <div className="mt-2 flex flex-wrap gap-1">
-          {tagsForTask(task).map((tag) => (
+          {tags.map((tag) => (
             <span
               key={tag.label}
               className={cn(
@@ -55,6 +157,13 @@ export function TaskCardBody({
             </span>
           ))}
         </div>
+        {task.goal && (
+          <GoalBar
+            goal={task.goal}
+            tone={tags[0]?.tone}
+            onStep={onGoalStep && ((delta) => onGoalStep(task, delta))}
+          />
+        )}
       </div>
     </div>
   );
@@ -65,11 +174,15 @@ function SortableTaskCardInner({
   onContextMenu,
   selected,
   onSelect,
+  onOpen,
+  onGoalStep,
 }: {
   task: Task;
   onContextMenu?: ((task: Task, e: React.MouseEvent) => void) | undefined;
   selected?: boolean;
   onSelect?: ((task: Task, e: React.MouseEvent) => void) | undefined;
+  onOpen?: ((task: Task) => void) | undefined;
+  onGoalStep?: ((task: Task, delta: 1 | -1) => void) | undefined;
 }) {
   // No layout-change animation and no CSS transition: the card must track the
   // pointer 1:1 with zero lag while dragging, and siblings must snap to their
@@ -94,6 +207,11 @@ function SortableTaskCardInner({
         e.stopPropagation();
         onSelect(task, e);
       }}
+      onDoubleClick={(e) => {
+        if (!onOpen) return;
+        e.stopPropagation();
+        onOpen(task);
+      }}
       onContextMenu={(e) => {
         if (!onContextMenu) return;
         e.preventDefault();
@@ -103,7 +221,7 @@ function SortableTaskCardInner({
       {...attributes}
       {...listeners}
     >
-      <TaskCardBody task={task} selected={selected ?? false} />
+      <TaskCardBody task={task} selected={selected ?? false} onGoalStep={onGoalStep} />
     </div>
   );
 }

@@ -13,6 +13,20 @@ const pool = mysql.createPool({
 });
 
 const COLUMNS = ["todo", "doing", "done"];
+
+// Bases creadas antes de las metas medibles: agrega las columnas que falten.
+async function migrate() {
+  const [cols] = await pool.query(
+    "SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks'",
+  );
+  const have = new Set(cols.map((c) => c.name));
+  if (!have.has("goal_target"))
+    await pool.query("ALTER TABLE tasks ADD COLUMN goal_target INT NULL");
+  if (!have.has("goal_current")) {
+    await pool.query("ALTER TABLE tasks ADD COLUMN goal_current INT NOT NULL DEFAULT 0");
+  }
+}
+let migrated;
 const toDate = (v) => (v ? new Date(v) : null);
 
 // Reemplaza el tablero completo, igual que saveBoard() con Supabase.
@@ -32,10 +46,12 @@ async function saveBoard(userId, rows) {
         r.type ?? null,
         JSON.stringify(r.history ?? []),
         toDate(r.created_at) ?? new Date(),
+        r.goal_target ?? null,
+        r.goal_current ?? 0,
       ]);
     if (values.length) {
       await conn.query(
-        "INSERT INTO tasks (id, user_id, title, column_id, position, type, history, created_at) VALUES ?",
+        "INSERT INTO tasks (id, user_id, title, column_id, position, type, history, created_at, goal_target, goal_current) VALUES ?",
         [values],
       );
     }
@@ -51,7 +67,8 @@ async function saveBoard(userId, rows) {
 const routes = {
   "GET /tasks": async () => {
     const [rows] = await pool.query(
-      "SELECT id, title, column_id, position, type, history, created_at FROM tasks ORDER BY position",
+      `SELECT id, title, column_id, position, type, history, created_at, goal_target, goal_current
+       FROM tasks ORDER BY position`,
     );
     return rows;
   },
@@ -114,6 +131,12 @@ createServer(async (req, res) => {
   const [handler, id] = match(req.method, pathname);
   if (!handler) return res.writeHead(404).end();
   try {
+    // Reintenta en la siguiente petición si MySQL aún no estaba listo.
+    migrated ??= migrate().catch((e) => {
+      migrated = undefined;
+      throw e;
+    });
+    await migrated;
     const result = await handler(await readJson(req), id);
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
   } catch (e) {

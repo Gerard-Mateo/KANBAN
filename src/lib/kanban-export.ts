@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import {
+  clampGoal,
   COLUMNS,
   COLUMN_TITLES,
   TYPE_LABELS,
@@ -20,6 +21,8 @@ type Row = {
   Tipo: string;
   Etiquetas: string;
   Creada: string;
+  Meta: number | string;
+  Avance: number | string;
 };
 
 type MoveRow = {
@@ -61,6 +64,8 @@ export function boardRows(board: BoardState): Row[] {
           .map((t) => t.label)
           .join(", "),
         Creada: task.createdAt ? new Date(task.createdAt).toLocaleString("es-EC") : "",
+        Meta: task.goal?.target ?? "",
+        Avance: task.goal ? task.goal.current : "",
       });
     }
   }
@@ -461,12 +466,14 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
     if (!col) return;
     const createdAt = parseLocalDate(row["Creada"]);
     const history = histories.get(title);
+    const target = Number(row["Meta"]);
     const task: Task = {
       id: `${col[0]}${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
       title,
       ...(createdAt !== undefined ? { createdAt } : {}),
       ...(typeFromLabel(row["Tipo"]) ? { type: typeFromLabel(row["Tipo"])! } : {}),
       ...(history?.length ? { history: [...history] } : {}),
+      ...(target >= 1 ? { goal: clampGoal({ target, current: Number(row["Avance"]) }) } : {}),
     };
     moveCount += history?.length ?? 0;
     board[col].push(task);

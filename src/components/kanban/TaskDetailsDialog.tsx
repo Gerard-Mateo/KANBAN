@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { CalendarClock, Hash, Layers, X } from "lucide-react";
+import { CalendarClock, Hash, Layers, Target, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBackdropClose } from "@/hooks/use-backdrop-close";
 import { useAllTypes } from "@/lib/custom-types";
-import { COLUMNS, type ColumnId, type Task } from "@/lib/kanban-data";
+import { COLUMNS, type ColumnId, type Task, type TaskGoal } from "@/lib/kanban-data";
 import { TypeCreator, TypeDot } from "./TypeCreator";
 
 export function TaskDetailsDialog({
@@ -11,6 +11,7 @@ export function TaskDetailsDialog({
   column,
   onClose,
   onSave,
+  onGoalChange,
   onMove,
   onDelete,
 }: {
@@ -18,6 +19,7 @@ export function TaskDetailsDialog({
   column: ColumnId | undefined;
   onClose: () => void;
   onSave: (patch: Partial<Task>) => void;
+  onGoalChange: (goal: TaskGoal | undefined) => void;
   onMove: (to: ColumnId) => void;
   onDelete: () => void;
 }) {
@@ -141,6 +143,8 @@ export function TaskDetailsDialog({
           ))}
         </div>
 
+        <GoalEditor goal={task.goal} onChange={onGoalChange} />
+
         <dl className="space-y-2 rounded-xl border border-border/60 bg-card/40 p-3 text-xs text-muted-foreground">
           <div className="flex items-center gap-2">
             <CalendarClock className="size-3.5" />
@@ -180,6 +184,93 @@ export function TaskDetailsDialog({
             Guardar
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Meta medible opcional: cuántas llevas de cuántas. */
+function GoalEditor({
+  goal,
+  onChange,
+}: {
+  goal: TaskGoal | undefined;
+  onChange: (goal: TaskGoal | undefined) => void;
+}) {
+  const targetRef = useRef<HTMLInputElement>(null);
+  const [adding, setAdding] = useState(false);
+
+  useEffect(() => {
+    if (adding && goal) {
+      targetRef.current?.focus();
+      targetRef.current?.select();
+      setAdding(false);
+    }
+  }, [adding, goal]);
+
+  const label = (
+    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      Meta medible <span className="normal-case tracking-normal opacity-70">(opcional)</span>
+    </label>
+  );
+
+  if (!goal) {
+    return (
+      <div className="mb-4">
+        {label}
+        <button
+          type="button"
+          onClick={() => {
+            onChange({ target: 10, current: 0 });
+            setAdding(true);
+          }}
+          className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border/70 px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-accent/50 hover:text-foreground"
+        >
+          <Target className="size-3.5" />
+          Añadir meta (p. ej. 10 blogs)
+        </button>
+      </div>
+    );
+  }
+
+  const input =
+    "w-16 rounded-lg border border-border/70 bg-card/60 px-2 py-1 text-center text-sm tabular-nums text-card-foreground outline-none focus:border-accent/60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+  const set = (patch: Partial<TaskGoal>) => {
+    const next = { ...goal, ...patch };
+    if (Number.isFinite(next.target) && Number.isFinite(next.current)) onChange(next);
+  };
+
+  return (
+    <div className="mb-4">
+      {label}
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <span>Llevo</span>
+        <input
+          type="number"
+          min={0}
+          max={goal.target}
+          value={goal.current}
+          onChange={(e) => set({ current: e.target.valueAsNumber })}
+          className={input}
+          aria-label="Avance actual"
+        />
+        <span>de</span>
+        <input
+          ref={targetRef}
+          type="number"
+          min={1}
+          value={goal.target}
+          onChange={(e) => set({ target: e.target.valueAsNumber })}
+          className={input}
+          aria-label="Meta"
+        />
+        <button
+          type="button"
+          onClick={() => onChange(undefined)}
+          className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-destructive hover:underline"
+        >
+          Quitar meta
+        </button>
       </div>
     </div>
   );
