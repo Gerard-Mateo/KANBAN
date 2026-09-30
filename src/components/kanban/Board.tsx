@@ -43,6 +43,7 @@ import {
   type Shortcut,
 } from "./ShortcutSetting";
 import { loadBoard, saveBoard } from "@/lib/tasks-cloud";
+import { USE_LOCAL_MYSQL } from "@/lib/local-db";
 import { saveBoardVersion } from "@/lib/local-save";
 import { ensureCustomType, upsertCustomType, useCustomTypes } from "@/lib/custom-types";
 import { replaceOkrs, sameText, syncKrTasksWithBoard } from "@/lib/okrs";
@@ -82,6 +83,14 @@ function isBlockContiguousAt(list: Task[], movingIds: Set<string>, overIndex: nu
 
 function rectsOverlap(a: { left: number; right: number; top: number; bottom: number }, b: DOMRect) {
   return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
+}
+
+// Los errores de Supabase son objetos planos con `message`, no instancias de Error.
+function errorMessage(e: unknown): string {
+  if (e && typeof e === "object" && "message" in e && typeof e.message === "string") {
+    return e.message;
+  }
+  return "error desconocido";
 }
 
 export function Board({ userId, email }: { userId: string; email?: string | undefined }) {
@@ -135,10 +144,11 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         } else if (!cancelled) {
           setBoard(cloud);
         }
-      } catch (e) {
-        if (!cancelled) setSyncError(e instanceof Error ? e.message : "Error de sincronización");
-      } finally {
         if (!cancelled) setLoaded(true);
+      } catch (e) {
+        // Sin `loaded` no hay autoguardado: guardar ahora pisaría los datos
+        // reales con un tablero vacío en cuanto la base vuelva a responder.
+        if (!cancelled) setSyncError(`No se pudo cargar (${errorMessage(e)}). Recarga la página.`);
       }
     })();
     return () => {
@@ -154,9 +164,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     const timer = setTimeout(() => {
       saveBoard(userId, board)
         .then(() => setSyncError(null))
-        .catch((e: unknown) =>
-          setSyncError(e instanceof Error ? e.message : "No se pudo guardar en la nube"),
-        )
+        .catch((e: unknown) => setSyncError(`No se pudo guardar: ${errorMessage(e)}`))
         .finally(() => setSyncing(false));
     }, 600);
     return () => clearTimeout(timer);
@@ -1030,7 +1038,9 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
                     ? `⚠ ${syncError}`
                     : syncing
                       ? "Guardando…"
-                      : "Guardado en la nube"}
+                      : USE_LOCAL_MYSQL
+                        ? "Guardado en MySQL local"
+                        : "Guardado en la nube"}
               </span>
               {selected.size > 0 && (
                 <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
