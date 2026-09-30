@@ -1144,15 +1144,25 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
             </div>
           </div>
 
+          {/* Mismo estilo que la barra de meta de las tarjetas, en el verde de Hecho. */}
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <div className="h-1.5 w-40 overflow-hidden rounded-full bg-secondary">
+            <div
+              className="relative h-[3px] w-40 overflow-hidden rounded-full"
+              style={{ background: "color-mix(in oklch, var(--done) 14%, transparent)" }}
+            >
               <div
-                className="h-full rounded-full bg-done transition-[width] duration-300"
-                style={{ width: `${filteredProgress}%` }}
+                className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out"
+                style={{
+                  width: `${filteredProgress}%`,
+                  background:
+                    "linear-gradient(90deg, color-mix(in oklch, var(--done) 55%, transparent), var(--done))",
+                  boxShadow: "0 0 6px color-mix(in oklch, var(--done) 45%, transparent)",
+                }}
               />
             </div>
-            <span className="text-xs text-muted-foreground">
-              {filteredDone} de {resultCount} completadas ({filteredProgress}%)
+            <span className="text-xs tabular-nums text-muted-foreground">
+              <span className="font-semibold text-done">{filteredDone}</span>/{resultCount}{" "}
+              completadas · {filteredProgress}%
             </span>
           </div>
         </div>
