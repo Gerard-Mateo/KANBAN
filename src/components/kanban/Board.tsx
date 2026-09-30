@@ -47,6 +47,7 @@ import {
 } from "./ShortcutSetting";
 import { loadBoard, saveBoard } from "@/lib/tasks-cloud";
 import { USE_LOCAL_MYSQL } from "@/lib/local-db";
+import { fireConfetti } from "@/lib/confetti";
 import { saveBoardVersion } from "@/lib/local-save";
 import { ensureCustomType, upsertCustomType, useCustomTypes } from "@/lib/custom-types";
 import { replaceOkrs, sameText, syncKrTasksWithBoard } from "@/lib/okrs";
@@ -159,6 +160,22 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  // Confeti cuando una tarea llega a Hecho, venga de donde venga (arrastre,
+  // detalles, meta cumplida, acciones en grupo). No al cargar ni al importar.
+  const doneIds = useRef<Set<string> | null>(null);
+  const quietConfetti = useRef(false);
+  useEffect(() => {
+    if (!loaded) return;
+    const ids = new Set(board.done.map((t) => t.id));
+    const prev = doneIds.current;
+    doneIds.current = ids;
+    if (!prev || quietConfetti.current) {
+      quietConfetti.current = false;
+      return;
+    }
+    if (board.done.some((t) => !prev.has(t.id))) fireConfetti();
+  }, [board.done, loaded]);
 
   // Guardado automático en la nube (con debounce).
   useEffect(() => {
@@ -1125,6 +1142,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
                   for (const t of types) upsertCustomType(t.label, t);
                   if (okrs) replaceOkrs(okrs);
                   registerBoardTypes(next);
+                  quietConfetti.current = true;
                   setBoard(next);
                   setSelected(new Set());
                   setDetailsId(null);

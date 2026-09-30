@@ -13,6 +13,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { COLUMN_TITLES, COLUMNS, type BoardState, type ColumnId } from "@/lib/kanban-data";
+import { fireConfetti } from "@/lib/confetti";
 import { loadBoard, saveBoard } from "@/lib/tasks-cloud";
 import { cn } from "@/lib/utils";
 import { TaskPicker } from "./TaskPicker";
@@ -232,6 +233,7 @@ export function PomodoroPage({
       { ...task, history: [...(task.history ?? []), { at: now, from, to: "done" as ColumnId }] },
     ];
     setBoard(next);
+    fireConfetti();
     await saveBoard(userId, next);
   }
 
