@@ -314,6 +314,29 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const saveResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Ctrl/Cmd+C con tareas seleccionadas copia sus títulos, uno por línea y en
+  // el orden del tablero. Si hay texto marcado o el foco está en un campo, se
+  // deja la copia normal del navegador.
+  useEffect(() => {
+    if (tab !== "board" || selected.size === 0) return;
+    const onCopy = (e: ClipboardEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      if (el?.closest("input, textarea, [contenteditable='true']")) return;
+      if (window.getSelection()?.toString()) return;
+      const titles = COLUMNS.flatMap((c) =>
+        boardRef.current[c.id].filter((t) => selected.has(t.id)).map((t) => t.title),
+      );
+      if (titles.length === 0 || !e.clipboardData) return;
+      e.preventDefault();
+      e.clipboardData.setData("text/plain", titles.join("\n"));
+      setSaveMessage(titles.length === 1 ? "Título copiado" : `${titles.length} títulos copiados`);
+      if (saveResetTimer.current) clearTimeout(saveResetTimer.current);
+      saveResetTimer.current = setTimeout(() => setSaveMessage(null), 2000);
+    };
+    document.addEventListener("copy", onCopy);
+    return () => document.removeEventListener("copy", onCopy);
+  }, [tab, selected]);
+
   const handleSave = useCallback(
     async (forcePick = false) => {
       if (saveState === "saving") return;
