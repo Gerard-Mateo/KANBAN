@@ -55,6 +55,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { PomodoroPage } from "@/components/pomodoro/PomodoroPage";
 import { OkrPage } from "@/components/okr/OkrPage";
 import { StatsPage } from "@/components/stats/StatsPage";
+import { CalendarPage } from "@/components/calendar/CalendarPage";
 
 const STORAGE_KEY = "kanban-board-v1";
 const SHORTCUT_KEY = "kanban-ctrl-a-new-task";
@@ -114,7 +115,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
   const [renameOpen, setRenameOpen] = useState(false);
   const [bulkCreateCol, setBulkCreateCol] = useState<ColumnId | null>(null);
   const [bulkDetailsOpen, setBulkDetailsOpen] = useState(false);
-  const [tab, setTab] = useState<"board" | "pomodoro" | "okr" | "stats">("board");
+  const [tab, setTab] = useState<"board" | "calendar" | "pomodoro" | "okr" | "stats">("board");
   const [pomodoroTask, setPomodoroTask] = useState<string | undefined>(undefined);
   const [typeahead, setTypeahead] = useState("");
   const typeaheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -437,6 +438,18 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         [from]: prev[from].filter((t) => t.id !== id),
         [to]: [...prev[to], logMove(updated, from, to)],
       };
+    });
+  }, []);
+
+  // Días del calendario de una tarea; sin días, el campo desaparece.
+  const handleSetDays = useCallback((id: string, days: string[]) => {
+    setBoard((prev) => {
+      const col = findColumn(prev, id);
+      const task = col && prev[col].find((t) => t.id === id);
+      if (!col || !task || (task.days ?? []).join() === days.join()) return prev;
+      const { days: _old, ...rest } = task;
+      const updated: Task = days.length ? { ...rest, days } : rest;
+      return { ...prev, [col]: prev[col].map((t) => (t.id === id ? updated : t)) };
     });
   }, []);
 
@@ -1068,6 +1081,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
 
   const tabLabels = {
     board: "Tablero",
+    calendar: "Calendario",
     pomodoro: "Pomodoro",
     okr: "OKRs",
     stats: "Stats",
@@ -1094,7 +1108,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
               className="flex items-center gap-0.5 rounded-lg bg-secondary p-0.5"
               onClick={(e) => e.stopPropagation()}
             >
-              {(["board", "pomodoro", "okr", "stats"] as const).map((t) => (
+              {(["board", "calendar", "pomodoro", "okr", "stats"] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -1299,6 +1313,10 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
               }}
             />
           )}
+        </div>
+
+        <div className={tab === "calendar" ? undefined : "hidden"}>
+          <CalendarPage board={board} onSetDays={handleSetDays} onOpenTask={setDetailsId} />
         </div>
 
         <div className={tab === "pomodoro" ? undefined : "hidden"}>

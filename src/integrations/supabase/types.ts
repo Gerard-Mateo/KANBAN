@@ -209,6 +209,7 @@ export type Database = {
           goal_target: number | null
           history: Json
           id: string
+          planned_days: string[]
           position: number
           title: string
           type: string | null
@@ -222,6 +223,7 @@ export type Database = {
           goal_target?: number | null
           history?: Json
           id?: string
+          planned_days?: string[]
           position?: number
           title?: string
           type?: string | null
@@ -235,6 +237,7 @@ export type Database = {
           goal_target?: number | null
           history?: Json
           id?: string
+          planned_days?: string[]
           position?: number
           title?: string
           type?: string | null

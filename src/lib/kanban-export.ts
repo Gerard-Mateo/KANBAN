@@ -14,6 +14,7 @@ import {
 } from "./kanban-data";
 import { colorFromValue, colorHex, colorOf, getCustomTypes } from "./custom-types";
 import { getOkrs, krProgress, normalizeOkrs, objectiveProgress, type Objective } from "./okrs";
+import { isIsoDay, normalizeDays, toIso } from "./calendar";
 
 type Row = {
   Estado: string;
@@ -23,6 +24,8 @@ type Row = {
   Creada: string;
   Meta: number | string;
   Avance: number | string;
+  /** Días del calendario, "2026-10-08, 2026-10-09". */
+  Días: string;
 };
 
 type MoveRow = {
@@ -66,6 +69,7 @@ export function boardRows(board: BoardState): Row[] {
         Creada: task.createdAt ? new Date(task.createdAt).toLocaleString("es-EC") : "",
         Meta: task.goal?.target ?? "",
         Avance: task.goal ? task.goal.current : "",
+        Días: (task.days ?? []).join(", "),
       });
     }
   }
@@ -123,7 +127,16 @@ const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 export function buildXlsxBuffer(board: BoardState): ArrayBuffer {
   const rows = boardRows(board);
   const sheet = XLSX.utils.json_to_sheet(rows);
-  sheet["!cols"] = [{ wch: 14 }, { wch: 70 }, { wch: 12 }, { wch: 24 }, { wch: 20 }];
+  sheet["!cols"] = [
+    { wch: 14 },
+    { wch: 70 },
+    { wch: 12 },
+    { wch: 24 },
+    { wch: 20 },
+    { wch: 6 },
+    { wch: 7 },
+    { wch: 36 },
+  ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, sheet, "Tareas");
 
@@ -426,6 +439,16 @@ function historyByTitle(rows: Record<string, unknown>[]): Map<string, MoveEvent[
   return map;
 }
 
+/** "2026-10-08, 2026-10-09" (o una sola fecha que Excel convirtió por su cuenta). */
+function parseDays(value: unknown): string[] {
+  if (value instanceof Date) return [toIso(value)];
+  return normalizeDays(
+    String(value ?? "")
+      .split(/[\s,;]+/)
+      .filter(isIsoDay),
+  );
+}
+
 export async function parseBoardFile(file: File): Promise<ImportResult> {
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: "array", cellDates: true });
@@ -467,6 +490,7 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
     const createdAt = parseLocalDate(row["Creada"]);
     const history = histories.get(title);
     const target = Number(row["Meta"]);
+    const days = parseDays(row["Días"]);
     const task: Task = {
       id: `${col[0]}${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
       title,
@@ -474,6 +498,7 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
       ...(typeFromLabel(row["Tipo"]) ? { type: typeFromLabel(row["Tipo"])! } : {}),
       ...(history?.length ? { history: [...history] } : {}),
       ...(target >= 1 ? { goal: clampGoal({ target, current: Number(row["Avance"]) }) } : {}),
+      ...(days.length ? { days } : {}),
     };
     moveCount += history?.length ?? 0;
     board[col].push(task);

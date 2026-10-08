@@ -13,6 +13,8 @@ export type Task = {
   type?: TagTone | undefined;
   history?: MoveEvent[] | undefined;
   goal?: TaskGoal | undefined;
+  /** Días del calendario en que se trabajará ("AAAA-MM-DD"), seguidos o no. */
+  days?: string[] | undefined;
 };
 
 /** Meta medible opcional: "3 de 10 blogs". */

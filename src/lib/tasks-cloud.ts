@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { USE_LOCAL_MYSQL, localApi } from "./local-db";
+import { normalizeDays } from "./calendar";
 import {
   COLUMNS,
   type BoardState,
@@ -21,6 +22,7 @@ type TaskRow = {
   created_at: string | null;
   goal_target?: number | null;
   goal_current?: number | null;
+  planned_days?: unknown;
 };
 
 async function fetchTaskRows(): Promise<TaskRow[]> {
@@ -48,6 +50,8 @@ export async function loadBoard(): Promise<BoardState> {
         ? { goal: { target: row.goal_target, current: row.goal_current ?? 0 } }
         : {}),
     };
+    const days = normalizeDays(row.planned_days);
+    if (days.length) task.days = days;
     board[col].push(task);
   }
   return board;
@@ -62,9 +66,17 @@ export async function countTasks(): Promise<number> {
   return count ?? 0;
 }
 
+// Columnas que llegaron con migraciones posteriores (metas, días del
+// calendario): solo viajan si alguna tarea las usa, y si la nube aún no tiene
+// la migración se guarda sin ellas en vez de fallar.
+const LATE_COLUMNS = [["goal_target", "goal_current"], ["planned_days"]] as const;
+
 /** Reemplaza el tablero completo del usuario en la nube. */
 export async function saveBoard(userId: string, board: BoardState): Promise<void> {
-  const withGoals = COLUMNS.flatMap((col) =>
+  const tasks = COLUMNS.flatMap((col) => board[col.id]);
+  const hasGoals = tasks.some((t) => t.goal);
+  const hasDays = tasks.some((t) => t.days?.length);
+  let rows = COLUMNS.flatMap((col) =>
     board[col.id].map((task, index) => ({
       user_id: userId,
       title: task.title,
@@ -73,15 +85,12 @@ export async function saveBoard(userId: string, board: BoardState): Promise<void
       type: task.type ?? null,
       history: (task.history ?? []) as unknown as never,
       ...(task.createdAt ? { created_at: new Date(task.createdAt).toISOString() } : {}),
-      goal_target: task.goal?.target ?? null,
-      goal_current: task.goal?.current ?? 0,
+      ...(hasGoals
+        ? { goal_target: task.goal?.target ?? null, goal_current: task.goal?.current ?? 0 }
+        : {}),
+      ...(hasDays ? { planned_days: task.days ?? [] } : {}),
     })),
   );
-  const withoutGoals = withGoals.map(({ goal_target: _t, goal_current: _c, ...rest }) => rest);
-  // Las columnas de meta solo viajan si alguna tarea tiene meta, así el
-  // guardado sigue funcionando en una base sin la migración de metas.
-  const hasGoals = COLUMNS.some((col) => board[col.id].some((t) => t.goal));
-  const rows = hasGoals ? withGoals : withoutGoals;
 
   if (USE_LOCAL_MYSQL) {
     await localApi("PUT", "/tasks", { user_id: userId, rows });
@@ -90,12 +99,18 @@ export async function saveBoard(userId: string, board: BoardState): Promise<void
   const { error: delError } = await supabase.from("tasks").delete().eq("user_id", userId);
   if (delError) throw delError;
   if (rows.length === 0) return;
-  const { error } = await supabase.from("tasks").insert(rows);
-  // PGRST204: la nube aún no tiene la migración de metas; guarda sin ellas.
-  if (error?.code === "PGRST204" && hasGoals) {
-    const { error: retryError } = await supabase.from("tasks").insert(withoutGoals);
-    if (retryError) throw retryError;
-    return;
+  for (let attempt = 0; ; attempt++) {
+    const { error } = await supabase.from("tasks").insert(rows);
+    if (!error) return;
+    // PGRST204: la nube no conoce una columna; se quita su grupo y se reintenta.
+    const missing =
+      error.code === "PGRST204" && attempt < LATE_COLUMNS.length
+        ? LATE_COLUMNS.find((group) => group.some((c) => error.message.includes(`'${c}'`)))
+        : undefined;
+    if (!missing) throw error;
+    const drop = new Set<string>(missing);
+    rows = rows.map(
+      (r) => Object.fromEntries(Object.entries(r).filter(([k]) => !drop.has(k))) as typeof r,
+    );
   }
-  if (error) throw error;
 }
