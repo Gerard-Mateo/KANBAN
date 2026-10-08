@@ -71,6 +71,8 @@ const SIZES = {
   week: { head: 40, lane: 30, more: 18 },
 } as const;
 const LANE_GAP = 3;
+/** Cuánto más ancho es hoy que los demás días en la vista de semana. */
+const TODAY_SPAN = 2.2;
 // Lo que ocupan la cabecera de la página, los controles y la lista de abajo.
 const CHROME_PX = 360;
 
@@ -97,6 +99,14 @@ function weekLabel(week: IsoDay[]) {
 }
 
 /** Color de la barra: el del tipo de la tarea, o gris para los tipos neutros. */
+/** El día de la rejilla que hay bajo ese punto de la pantalla. */
+function dayAt(x: number, y: number): IsoDay | undefined {
+  const hit = document
+    .elementsFromPoint(x, y)
+    .find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset["day"]);
+  return hit?.dataset["day"];
+}
+
 function barColors(
   task: Task,
   customTypes: CustomType[],
@@ -231,10 +241,15 @@ export function CalendarPage({
     let width: number | null = null;
     const rect = data.kind === "run" ? data.measure() : null;
     if (data.kind === "run" && rect) {
-      // Qué día de la barra se agarró: así el tramo se mueve desde ese punto.
+      // Qué día de la barra se agarró (el que está bajo el puntero, porque en la
+      // semana hoy es más ancho): así el tramo se mueve desde ese punto.
       width = rect.width;
-      const col = Math.floor(((pointer.clientX - rect.left) / rect.width) * data.shownDays);
-      grabDay = addDays(data.firstShown, Math.min(data.shownDays - 1, Math.max(0, col)));
+      const under = dayAt(pointer.clientX, pointer.clientY);
+      if (under && data.run.includes(under)) grabDay = under;
+      else {
+        const col = Math.floor(((pointer.clientX - rect.left) / rect.width) * data.shownDays);
+        grabDay = addDays(data.firstShown, Math.min(data.shownDays - 1, Math.max(0, col)));
+      }
     }
     copyRef.current = pointer.ctrlKey || pointer.metaKey;
     setCopy(copyRef.current);
@@ -293,10 +308,7 @@ export function CalendarPage({
     const fixed = resize.edge === "end" ? resize.run[0]! : resize.run[resize.run.length - 1]!;
     let last: IsoDay | null = null;
     const onMove = (e: PointerEvent) => {
-      const hit = document
-        .elementsFromPoint(e.clientX, e.clientY)
-        .find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset["day"]);
-      const day = hit?.dataset["day"];
+      const day = dayAt(e.clientX, e.clientY);
       if (!day || day === last) return;
       last = day;
       // El borde fijo no se cruza: al encoger, el tramo se queda en un día.
@@ -544,6 +556,14 @@ function WeekRow({
       ref={rowRef}
       className="relative grid grid-cols-7 border-b border-border last:border-b-0"
       style={{
+        // En la semana, hoy se ensancha para leer mejor sus tareas.
+        ...(view === "week" && week.includes(today)
+          ? {
+              gridTemplateColumns: week
+                .map((d) => `minmax(0, ${d === today ? TODAY_SPAN : 1}fr)`)
+                .join(" "),
+            }
+          : {}),
         gridTemplateRows: `${sizes.head}px repeat(${shown}, ${sizes.lane}px) minmax(${sizes.more}px, 1fr)`,
         rowGap: LANE_GAP,
         minHeight: rowPx,
@@ -717,6 +737,7 @@ function DayCell({
         col < 6 && "border-r border-border",
         weekend && "bg-background/40",
         outside && "bg-background/70",
+        isToday && view === "week" && "bg-primary/[0.04]",
         (highlighted || isOver) && "bg-primary/10 shadow-[inset_0_0_0_1px_var(--primary)]",
       )}
     >
