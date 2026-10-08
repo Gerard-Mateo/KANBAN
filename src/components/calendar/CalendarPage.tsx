@@ -522,12 +522,26 @@ function WeekRow({
   const sizes = SIZES[view];
   const { segments, lanes } = layoutWeek(items, (i) => i.task.days, week);
   const shown = Math.min(lanes, laneCap);
-  const hiddenPerDay = week.map(
-    (_, c) => segments.filter((s) => s.lane >= laneCap && s.startCol <= c && s.endCol >= c).length,
+  const hiddenPerDay = week.map((_, c) =>
+    segments
+      .filter((s) => s.lane >= laneCap && s.startCol <= c && s.endCol >= c)
+      .map((s) => s.item),
   );
+
+  // Ancho de cada día, para decidir cuántos puntitos caben.
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [colWidth, setColWidth] = useState(180);
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => entry && setColWidth(entry.contentRect.width / 7));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <div
+      ref={rowRef}
       className="relative grid grid-cols-7 border-b border-border last:border-b-0"
       style={{
         gridTemplateRows: `${sizes.head}px repeat(${shown}, ${sizes.lane}px) minmax(${sizes.more}px, 1fr)`,
@@ -565,20 +579,113 @@ function WeekRow({
           />
         ))}
 
-      {hiddenPerDay.map((n, c) =>
-        n > 0 ? (
-          <button
+      {hiddenPerDay.map((hidden, c) =>
+        hidden.length > 0 ? (
+          <HiddenDots
             key={c}
-            type="button"
+            items={hidden}
+            width={colWidth - 16}
+            customTypes={customTypes}
             onClick={() => onShowWeek(week[c]!)}
             style={{ gridColumn: c + 1, gridRow: shown + 2 }}
-            className="relative z-10 mx-1 self-start justify-self-start rounded px-1 text-[10px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
-          >
-            +{n} más
-          </button>
+          />
         ) : null,
       )}
     </div>
+  );
+}
+
+const DOT = 7;
+const DOT_GAP = 3;
+/** Separación mínima entre fichas apiladas antes de pasar a la cápsula. */
+const MIN_STEP = 3.5;
+const COUNT_PX = 22;
+
+/** Las tareas que no caben en el día: un puntito por tarea en el color de su
+ * tipo. Si no hay sitio, los puntitos se apilan como fichas de póker; y si ni
+ * así caben, se funden en una cápsula con el reparto de colores y el total. */
+function HiddenDots({
+  items,
+  width,
+  customTypes,
+  onClick,
+  style,
+}: {
+  items: Item[];
+  width: number;
+  customTypes: CustomType[];
+  onClick: () => void;
+  style: CSSProperties;
+}) {
+  // Agrupados por color: así las fichas y la cápsula leen por tipo.
+  const dots = items
+    .map((item) => ({ item, color: barColors(item.task, customTypes).accent }))
+    .sort((a, b) => a.color.localeCompare(b.color));
+  const n = dots.length;
+  const mode =
+    n * DOT + (n - 1) * DOT_GAP <= width
+      ? "dots"
+      : DOT + (n - 1) * MIN_STEP <= width
+        ? "stack"
+        : "capsule";
+  const step = mode === "dots" ? DOT + DOT_GAP : (width - DOT) / Math.max(1, n - 1);
+  const titles = items.map((i) => `• ${i.task.title || "(sin título)"}`).join("\n");
+
+  const groups: { color: string; count: number }[] = [];
+  for (const d of dots) {
+    const last = groups[groups.length - 1];
+    if (last?.color === d.color) last.count += 1;
+    else groups.push({ color: d.color, count: 1 });
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${n} tarea(s) más · clic para ver la semana\n${titles}`}
+      aria-label={`${n} tarea(s) más; ver la semana`}
+      style={style}
+      className="group/more relative z-10 mx-1.5 flex h-[18px] items-center self-start justify-self-start rounded-full outline-none focus-visible:ring-1 focus-visible:ring-primary"
+    >
+      {mode === "capsule" ? (
+        <span className="flex items-center gap-1.5">
+          <span
+            className="flex h-1.5 overflow-hidden rounded-full transition-[height] group-hover/more:h-2"
+            style={{ width: Math.max(24, width - COUNT_PX - 6), gap: 2 }}
+          >
+            {groups.map((g) => (
+              <span
+                key={g.color}
+                style={{ flexGrow: g.count, flexBasis: 0, minWidth: 3, backgroundColor: g.color }}
+              />
+            ))}
+          </span>
+          <span className="text-[10px] font-semibold text-muted-foreground tabular-nums group-hover/more:text-foreground">
+            {n}
+          </span>
+        </span>
+      ) : (
+        <span className="relative block" style={{ width: DOT + (n - 1) * step, height: DOT }}>
+          {dots.map((d, i) => (
+            <span
+              key={d.item.task.id}
+              className="absolute top-0 rounded-full transition-transform duration-150 group-hover/more:scale-125"
+              style={{
+                left: i * step,
+                width: DOT,
+                height: DOT,
+                zIndex: i,
+                backgroundColor: d.color,
+                opacity: d.item.col === "done" ? 0.45 : 1,
+                // Al apilarse, un aro del color del fondo separa cada ficha.
+                boxShadow: mode === "stack" ? "0 0 0 1.5px var(--background)" : undefined,
+                transitionDelay: `${Math.min(i, 20) * 12}ms`,
+              }}
+            />
+          ))}
+        </span>
+      )}
+    </button>
   );
 }
 
