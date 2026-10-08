@@ -11,7 +11,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { CalendarDays, ChevronLeft, ChevronRight, Copy, Search, X } from "lucide-react";
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Copy, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { COLUMNS, tagsForTask, type BoardState, type ColumnId, type Task } from "@/lib/kanban-data";
 import { chipCss, colorOf, dotCss, useCustomTypes, type CustomType } from "@/lib/custom-types";
@@ -54,11 +54,6 @@ type Resize = { taskId: string; run: IsoDay[]; edge: "start" | "end"; base: IsoD
 const VIEW_KEY = "kanban-calendar-view";
 const WEEKDAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 const NEUTRAL_TONES = new Set(["module", "other"]);
-const STATUS_COLOR: Record<ColumnId, string> = {
-  todo: "var(--todo)",
-  doing: "var(--doing)",
-  done: "var(--done)",
-};
 const STATUS_LABEL: Record<ColumnId, string> = {
   todo: "Por hacer",
   doing: "En progreso",
@@ -130,11 +125,14 @@ export function CalendarPage({
   board,
   onSetDays,
   onOpenTask,
+  onToggleDone,
 }: {
   board: BoardState;
   /** Debe ser estable (useCallback): lo usa el estirado mientras dura. */
   onSetDays: (taskId: string, days: IsoDay[]) => void;
   onOpenTask: (taskId: string) => void;
+  /** La casilla de una barra: marca la tarea como hecha o la devuelve. */
+  onToggleDone: (taskId: string) => void;
 }) {
   const customTypes = useCustomTypes();
   const today = todayIso();
@@ -449,6 +447,7 @@ export function CalendarPage({
               draggingRun={drag?.kind === "run" && !copy ? drag.run : null}
               customTypes={customTypes}
               onOpen={openTask}
+              onToggleDone={onToggleDone}
               onRemove={removeRun}
               onResizeStart={startResize}
               onShowWeek={(day) => {
@@ -459,7 +458,14 @@ export function CalendarPage({
           ))}
         </div>
 
-        <Pool items={items} today={today} customTypes={customTypes} drag={drag} onOpen={openTask} />
+        <Pool
+          items={items}
+          today={today}
+          customTypes={customTypes}
+          drag={drag}
+          onOpen={openTask}
+          onToggleDone={onToggleDone}
+        />
 
         <DragOverlay dropAnimation={null}>
           {drag && activeItem ? (
@@ -506,6 +512,7 @@ function WeekRow({
   draggingRun,
   customTypes,
   onOpen,
+  onToggleDone,
   onRemove,
   onResizeStart,
   onShowWeek,
@@ -522,6 +529,7 @@ function WeekRow({
   draggingRun: IsoDay[] | null;
   customTypes: CustomType[];
   onOpen: (id: string) => void;
+  onToggleDone: (id: string) => void;
   onRemove: (taskId: string, run: IsoDay[]) => void;
   onResizeStart: (
     e: React.PointerEvent,
@@ -594,6 +602,7 @@ function WeekRow({
               draggingTaskId === s.item.task.id && !!draggingRun && draggingRun[0] === s.run[0]
             }
             onOpen={onOpen}
+            onToggleDone={onToggleDone}
             onRemove={onRemove}
             onResizeStart={onResizeStart}
           />
@@ -775,6 +784,83 @@ function DayCell({
 
 /* --------------------------------- Barras -------------------------------- */
 
+/** Casilla redonda en el color del tipo, como los estados de Linear: vacía es
+ * Por hacer, media llena es En progreso y llena con ✓ es Hecha. Con `onToggle`
+ * es un botón: un clic la marca como hecha (o la devuelve). */
+function StatusCheck({
+  col,
+  accent,
+  size = 13,
+  onToggle,
+}: {
+  col: ColumnId;
+  accent: string;
+  size?: number;
+  onToggle?: (() => void) | undefined;
+}) {
+  const done = col === "done";
+  const style: CSSProperties = {
+    width: size,
+    height: size,
+    boxShadow: `inset 0 0 0 1.5px ${accent}`,
+    backgroundColor: done ? accent : "transparent",
+  };
+  const inner = (
+    <>
+      {col === "doing" && (
+        <span
+          aria-hidden
+          className="absolute inset-[2.5px] rounded-full"
+          style={{ background: `conic-gradient(${accent} 0 50%, transparent 50% 100%)` }}
+        />
+      )}
+      <Check
+        aria-hidden
+        strokeWidth={3.5}
+        className={cn(
+          "relative size-[72%] transition-[opacity,transform] duration-150",
+          done ? "scale-100 opacity-100" : "scale-50 opacity-0",
+          onToggle && !done && "group-hover/check:scale-100 group-hover/check:opacity-70",
+        )}
+        style={{ color: done ? "var(--background)" : accent }}
+      />
+    </>
+  );
+  const base =
+    "relative grid shrink-0 place-items-center rounded-full transition-[background-color,transform]";
+  if (!onToggle) {
+    return (
+      <span aria-hidden className={base} style={style}>
+        {inner}
+      </span>
+    );
+  }
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={done}
+      aria-label={done ? "Marcar como pendiente" : "Marcar como hecha"}
+      title={done ? "Hecha · clic para devolverla" : "Marcar como hecha"}
+      onPointerDown={stop}
+      onKeyDown={stop}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={cn(
+        base,
+        // Zona de clic más grande que el círculo.
+        "group/check cursor-pointer outline-none before:absolute before:-inset-1.5 before:content-[''] hover:scale-110 focus-visible:ring-1 focus-visible:ring-primary active:scale-95",
+      )}
+      style={style}
+    >
+      {inner}
+    </button>
+  );
+}
+
 function BarBody({
   item,
   customTypes,
@@ -783,6 +869,7 @@ function BarBody({
   lifted,
   continuesBefore = false,
   continuesAfter = false,
+  onToggleDone,
 }: {
   item: Item;
   customTypes: CustomType[];
@@ -791,6 +878,7 @@ function BarBody({
   lifted?: boolean;
   continuesBefore?: boolean;
   continuesAfter?: boolean;
+  onToggleDone?: (() => void) | undefined;
 }) {
   const { task, col } = item;
   const { style, accent } = barColors(task, customTypes);
@@ -804,11 +892,7 @@ function BarBody({
       )}
       style={{ ...style, height, boxShadow: edgeShadow(accent, !continuesBefore, !!lifted) }}
     >
-      <span
-        aria-hidden
-        className="size-1.5 shrink-0 rounded-full"
-        style={{ backgroundColor: STATUS_COLOR[col] }}
-      />
+      <StatusCheck col={col} accent={accent} onToggle={onToggleDone} />
       <span className={cn("truncate", done && "line-through opacity-60")}>
         {task.title || "(sin título)"}
       </span>
@@ -828,6 +912,7 @@ function RunBar({
   customTypes,
   dimmed,
   onOpen,
+  onToggleDone,
   onRemove,
   onResizeStart,
 }: {
@@ -837,6 +922,7 @@ function RunBar({
   customTypes: CustomType[];
   dimmed: boolean;
   onOpen: (id: string) => void;
+  onToggleDone: (id: string) => void;
   onRemove: (taskId: string, run: IsoDay[]) => void;
   onResizeStart: (
     e: React.PointerEvent,
@@ -894,6 +980,7 @@ function RunBar({
         detailed={view === "week"}
         continuesBefore={seg.continuesBefore}
         continuesAfter={seg.continuesAfter}
+        onToggleDone={() => onToggleDone(task.id)}
       />
       {!seg.continuesBefore && (
         <span
@@ -935,11 +1022,13 @@ function ChipBody({
   today,
   customTypes,
   lifted,
+  onToggleDone,
 }: {
   item: Item;
   today: IsoDay;
   customTypes: CustomType[];
   lifted?: boolean;
+  onToggleDone?: (() => void) | undefined;
 }) {
   const { task, col } = item;
   const { style, accent } = barColors(task, customTypes);
@@ -952,11 +1041,7 @@ function ChipBody({
       )}
       style={{ ...style, boxShadow: edgeShadow(accent, true, !!lifted) }}
     >
-      <span
-        aria-hidden
-        className="size-1.5 shrink-0 rounded-full"
-        style={{ backgroundColor: STATUS_COLOR[col] }}
-      />
+      <StatusCheck col={col} accent={accent} onToggle={onToggleDone} />
       <span className="truncate">{task.title || "(sin título)"}</span>
       {planned > 0 && (
         <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] opacity-70">
@@ -973,11 +1058,13 @@ function PoolChip({
   today,
   customTypes,
   onOpen,
+  onToggleDone,
 }: {
   item: Item;
   today: IsoDay;
   customTypes: CustomType[];
   onOpen: (id: string) => void;
+  onToggleDone: (id: string) => void;
 }) {
   const data: DragData = { kind: "task", taskId: item.task.id };
   const { setNodeRef, attributes, listeners, isDragging } = useDraggable({
@@ -1001,7 +1088,12 @@ function PoolChip({
         isDragging && "opacity-35",
       )}
     >
-      <ChipBody item={item} today={today} customTypes={customTypes} />
+      <ChipBody
+        item={item}
+        today={today}
+        customTypes={customTypes}
+        onToggleDone={() => onToggleDone(item.task.id)}
+      />
     </div>
   );
 }
@@ -1012,12 +1104,14 @@ function Pool({
   customTypes,
   drag,
   onOpen,
+  onToggleDone,
 }: {
   items: Item[];
   today: IsoDay;
   customTypes: CustomType[];
   drag: Drag | null;
   onOpen: (id: string) => void;
+  onToggleDone: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [cols, setCols] = useState<Set<ColumnId>>(() => new Set(["todo", "doing"]));
@@ -1068,11 +1162,13 @@ function Pool({
           {unplanned} sin planificar de {open.length}
         </span>
         {(["todo", "doing"] as const).map((c) => (
-          <button key={c} type="button" onClick={() => toggle(c)} className={pill(cols.has(c))}>
-            <span
-              className="mr-1 inline-block size-1.5 rounded-full align-middle"
-              style={{ backgroundColor: STATUS_COLOR[c] }}
-            />
+          <button
+            key={c}
+            type="button"
+            onClick={() => toggle(c)}
+            className={cn(pill(cols.has(c)), "inline-flex items-center gap-1.5")}
+          >
+            <StatusCheck col={c} accent="currentColor" size={11} />
             {STATUS_LABEL[c]} · {open.filter((i) => i.col === c).length}
           </button>
         ))}
@@ -1106,6 +1202,7 @@ function Pool({
               today={today}
               customTypes={customTypes}
               onOpen={onOpen}
+              onToggleDone={onToggleDone}
             />
           ))}
           {visible.length === 0 && (

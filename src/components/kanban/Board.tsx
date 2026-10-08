@@ -73,6 +73,12 @@ function logMove(task: Task, from: ColumnId | null, to: ColumnId): Task {
   return { ...task, history: [...(task.history ?? []), { at: Date.now(), from, to }] };
 }
 
+/** La columna desde la que la tarea llegó a Hecho (Por Hacer si no se sabe). */
+function columnBeforeDone(task: Task): ColumnId {
+  const lastIn = [...(task.history ?? [])].reverse().find((e) => e.to === "done");
+  return lastIn?.from && lastIn.from !== "done" ? lastIn.from : "todo";
+}
+
 function findColumn(board: BoardState, id: string): ColumnId | undefined {
   if (id in board) return id as ColumnId;
   return COLUMNS.find((c) => board[c.id].some((t) => t.id === id))?.id;
@@ -1023,9 +1029,14 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
       return;
     }
     if (found.col !== "done") return;
-    const lastIn = [...(found.task.history ?? [])].reverse().find((e) => e.to === "done");
-    const back = lastIn?.from && lastIn.from !== "done" ? lastIn.from : "todo";
-    handleMove(found.task.id, back);
+    handleMove(found.task.id, columnBeforeDone(found.task));
+  }
+
+  // Casilla del calendario: la tarea pasa a Hecho o vuelve de donde vino.
+  function toggleTaskDone(id: string) {
+    const found = findTask(id);
+    if (!found) return;
+    handleMove(id, found.col === "done" ? columnBeforeDone(found.task) : "done");
   }
 
   function setBoardTaskTypeByTitle(title: string, type: string | null) {
@@ -1316,7 +1327,12 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         </div>
 
         <div className={tab === "calendar" ? undefined : "hidden"}>
-          <CalendarPage board={board} onSetDays={handleSetDays} onOpenTask={setDetailsId} />
+          <CalendarPage
+            board={board}
+            onSetDays={handleSetDays}
+            onOpenTask={setDetailsId}
+            onToggleDone={toggleTaskDone}
+          />
         </div>
 
         <div className={tab === "pomodoro" ? undefined : "hidden"}>
