@@ -441,3 +441,23 @@ export function syncKrTasksWithBoard(tasks: BoardTaskRef[]) {
   }));
   if (changed) write(next);
 }
+
+/** Una tarjeta redefinida se lleva su mini-tarea: el título y el enlace pasan
+ * a la nueva definición, en vez de quedarse huérfanos con el título viejo. */
+export function relinkBoardTask(oldTitle: string, newTitle: string) {
+  const key = sameText(oldTitle);
+  if (!key || key === sameText(newTitle)) return;
+  let changed = false;
+  const next = read().map((o) => ({
+    ...o,
+    keyResults: o.keyResults.map((kr) => ({
+      ...kr,
+      tasks: kr.tasks.map((t) => {
+        if (sameText(t.boardTaskTitle || t.title) !== key) return t;
+        changed = true;
+        return { ...t, title: newTitle, boardTaskTitle: newTitle };
+      }),
+    })),
+  }));
+  if (changed) write(next);
+}

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Copy, Info, Pencil, PencilLine, Plus, Timer, Trash2, X } from "lucide-react";
+import { Copy, Info, Pencil, PencilLine, Plus, History, Timer, Trash2, X } from "lucide-react";
 
 export type MenuState = { x: number; y: number; taskId: string } | null;
 
@@ -9,6 +9,7 @@ export function TaskContextMenu({
   onDelete,
   onAddBelow,
   onDetails,
+  onRedefine,
   onPomodoro,
   selectedCount = 0,
   onClone,
@@ -21,6 +22,7 @@ export function TaskContextMenu({
   onDelete: () => void;
   onAddBelow: () => void;
   onDetails: () => void;
+  onRedefine?: () => void;
   onPomodoro?: () => void;
   selectedCount?: number;
   onClone?: () => void;
@@ -54,6 +56,9 @@ export function TaskContextMenu({
       ? [{ label: "Iniciar pomodoro", icon: Timer, action: onPomodoro, danger: false }]
       : []),
     { label: "Ver detalles", icon: Info, action: onDetails, danger: false },
+    ...(onRedefine
+      ? [{ label: "Redefinir…", icon: History, action: onRedefine, danger: false }]
+      : []),
     { label: "Nueva tarea debajo", icon: Plus, action: onAddBelow, danger: false },
     ...(multi && onRename
       ? [

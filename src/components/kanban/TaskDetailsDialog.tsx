@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { CalendarClock, Hash, Layers, Target, X } from "lucide-react";
+import { CalendarClock, Hash, Layers, History, Target, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBackdropClose } from "@/hooks/use-backdrop-close";
 import { useAllTypes } from "@/lib/custom-types";
-import { COLUMNS, type ColumnId, type Task, type TaskGoal } from "@/lib/kanban-data";
+import {
+  COLUMNS,
+  typeLabel,
+  type ColumnId,
+  type Redefinition,
+  type Task,
+  type TaskGoal,
+} from "@/lib/kanban-data";
 import { TypeCreator, TypeDot } from "./TypeCreator";
 
 export function TaskDetailsDialog({
@@ -14,6 +21,7 @@ export function TaskDetailsDialog({
   onGoalChange,
   onMove,
   onDelete,
+  onRedefine,
 }: {
   task: Task | null;
   column: ColumnId | undefined;
@@ -22,6 +30,8 @@ export function TaskDetailsDialog({
   onGoalChange: (goal: TaskGoal | undefined) => void;
   onMove: (to: ColumnId) => void;
   onDelete: () => void;
+  /** Abre "Redefinir": la definición actual pasa al historial. */
+  onRedefine?: () => void;
 }) {
   const [title, setTitle] = useState(task?.title ?? "");
   const titleRef = useRef<HTMLTextAreaElement>(null);
@@ -64,7 +74,7 @@ export function TaskDetailsDialog({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="glass-panel w-full max-w-lg rounded-2xl p-5 shadow-2xl"
+        className="glass-panel max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl p-5 shadow-2xl"
       >
         <div className="mb-4 flex items-start gap-3">
           <h3 className="font-display text-lg font-semibold tracking-tight text-foreground">
@@ -80,9 +90,21 @@ export function TaskDetailsDialog({
           </button>
         </div>
 
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Título
-        </label>
+        <div className="mb-1 flex items-center gap-2">
+          <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Título
+          </label>
+          {onRedefine && (
+            <button
+              type="button"
+              onClick={onRedefine}
+              title="Darle otro propósito: la definición actual queda en el historial"
+              className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              <History className="size-3" /> Redefinir…
+            </button>
+          )}
+        </div>
         <textarea
           ref={titleRef}
           value={title}
@@ -98,6 +120,8 @@ export function TaskDetailsDialog({
           rows={3}
           className="mb-4 w-full resize-none rounded-xl border border-border/70 bg-card/60 p-3 text-sm text-card-foreground outline-none focus:border-accent/60"
         />
+
+        {task.redefinitions?.length ? <PastDefinitions list={task.redefinitions} /> : null}
 
         <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Tipo de tarea
@@ -185,6 +209,44 @@ export function TaskDetailsDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Lo que la tarea fue antes de redefinirla, de la más reciente a la más vieja:
+ * tachado y en pequeño, para que la definición vigente sea lo que destaca. */
+function PastDefinitions({ list }: { list: Redefinition[] }) {
+  return (
+    <div className="mb-4">
+      <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        Definiciones anteriores
+      </p>
+      <ol className="space-y-1.5">
+        {[...list].reverse().map((r, i) => (
+          <li
+            key={`${r.at}-${i}`}
+            className="rounded-lg border border-border/40 bg-card/30 px-3 py-2"
+          >
+            <p className="text-xs text-muted-foreground line-through decoration-muted-foreground/60">
+              {r.title}
+            </p>
+            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[10px] text-muted-foreground/80">
+              {r.at > 0 && (
+                <span>
+                  Hasta el{" "}
+                  {new Date(r.at).toLocaleDateString("es-EC", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </span>
+              )}
+              {r.type && <span>· {typeLabel(r.type)}</span>}
+              {r.reason && <span className="italic">· {r.reason}</span>}
+            </p>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

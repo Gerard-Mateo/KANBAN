@@ -14,7 +14,8 @@ const pool = mysql.createPool({
 
 const COLUMNS = ["todo", "doing", "done"];
 
-// Bases creadas antes de las metas o del calendario: agrega las columnas que falten.
+// Bases creadas antes de las metas, del calendario o de las redefiniciones:
+// agrega las columnas que falten.
 async function migrate() {
   const [cols] = await pool.query(
     "SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks'",
@@ -27,6 +28,8 @@ async function migrate() {
   }
   if (!have.has("planned_days"))
     await pool.query("ALTER TABLE tasks ADD COLUMN planned_days JSON NULL");
+  if (!have.has("redefinitions"))
+    await pool.query("ALTER TABLE tasks ADD COLUMN redefinitions JSON NULL");
 }
 let migrated;
 const toDate = (v) => (v ? new Date(v) : null);
@@ -51,10 +54,11 @@ async function saveBoard(userId, rows) {
         r.goal_target ?? null,
         r.goal_current ?? 0,
         JSON.stringify(r.planned_days ?? []),
+        JSON.stringify(r.redefinitions ?? []),
       ]);
     if (values.length) {
       await conn.query(
-        "INSERT INTO tasks (id, user_id, title, column_id, position, type, history, created_at, goal_target, goal_current, planned_days) VALUES ?",
+        "INSERT INTO tasks (id, user_id, title, column_id, position, type, history, created_at, goal_target, goal_current, planned_days, redefinitions) VALUES ?",
         [values],
       );
     }
@@ -71,7 +75,7 @@ const routes = {
   "GET /tasks": async () => {
     const [rows] = await pool.query(
       `SELECT id, title, column_id, position, type, history, created_at, goal_target, goal_current,
-              planned_days
+              planned_days, redefinitions
        FROM tasks ORDER BY position`,
     );
     return rows;

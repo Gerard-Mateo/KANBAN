@@ -25,6 +25,7 @@ import {
   tagsForTask,
   type BoardState,
   type ColumnId,
+  type Redefinition,
   type Task,
   type TaskGoal,
 } from "@/lib/kanban-data";
@@ -38,6 +39,7 @@ import { CloneRenameDialog, replaceWord } from "./CloneRenameDialog";
 import { BulkRenameDialog, applyRename, type RenameMode } from "./BulkRenameDialog";
 import { BulkCreateDialog } from "./BulkCreateDialog";
 import { BulkDetailsDialog } from "./BulkDetailsDialog";
+import { RedefineDialog, type RedefineInput } from "./RedefineDialog";
 import {
   DEFAULT_SHORTCUT,
   ShortcutSetting,
@@ -50,7 +52,7 @@ import { USE_LOCAL_MYSQL } from "@/lib/local-db";
 import { fireConfetti } from "@/lib/confetti";
 import { saveBoardVersion } from "@/lib/local-save";
 import { ensureCustomType, upsertCustomType, useCustomTypes } from "@/lib/custom-types";
-import { replaceOkrs, sameText, syncKrTasksWithBoard } from "@/lib/okrs";
+import { relinkBoardTask, replaceOkrs, sameText, syncKrTasksWithBoard } from "@/lib/okrs";
 import { supabase } from "@/integrations/supabase/client";
 import { PomodoroPage } from "@/components/pomodoro/PomodoroPage";
 import { OkrPage } from "@/components/okr/OkrPage";
@@ -114,6 +116,8 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
   const [tones, setTones] = useState<Set<TagTone>>(new Set());
   const [menu, setMenu] = useState<MenuState>(null);
   const [detailsId, setDetailsId] = useState<string | null>(null);
+  // Tarea que se está redefiniendo; `reopen` vuelve a sus detalles al terminar.
+  const [redefine, setRedefine] = useState<{ id: string; reopen: boolean } | null>(null);
   const [shortcutOn, setShortcutOn] = useState(true);
   const [shortcut, setShortcut] = useState<Shortcut>(DEFAULT_SHORTCUT);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -897,6 +901,45 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     }));
   }
 
+  // Redefinir: la definición actual (título, tipo, motivo) pasa al historial de
+  // la tarea y la nueva ocupa su lugar; estado, días e historial se conservan.
+  function handleRedefine(id: string, { title, type, reason }: RedefineInput) {
+    const found = findTask(id);
+    if (!found) return;
+    const old = found.task;
+    const entry: Redefinition | null = old.title.trim()
+      ? {
+          title: old.title,
+          at: Date.now(),
+          ...(old.type ? { type: old.type } : {}),
+          ...(reason ? { reason } : {}),
+        }
+      : null;
+    if (type) ensureCustomType(type);
+    setBoard((prev) => ({
+      ...prev,
+      [found.col]: prev[found.col].map((t) => {
+        if (t.id !== id) return t;
+        const { type: _oldType, ...rest } = t;
+        return {
+          ...rest,
+          title,
+          ...(type ? { type } : {}),
+          redefinitions: entry ? [...(t.redefinitions ?? []), entry] : (t.redefinitions ?? []),
+        };
+      }),
+    }));
+    // Su mini-tarea de OKR la sigue al nuevo título en vez de quedar huérfana.
+    relinkBoardTask(old.title, title);
+  }
+
+  function closeRedefine(input?: RedefineInput) {
+    if (!redefine) return;
+    if (input) handleRedefine(redefine.id, input);
+    setRedefine(null);
+    if (redefine.reopen) setDetailsId(redefine.id);
+  }
+
   function handleMove(id: string, to: ColumnId) {
     const found = findTask(id);
     if (!found || found.col === to) return;
@@ -1374,6 +1417,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         onClearSelection={() => setSelected(new Set())}
         onAddBelow={() => menu && handleAddBelow(menu.taskId)}
         onDetails={() => menu && handleDetailsFromMenu(menu.taskId)}
+        onRedefine={() => menu && setRedefine({ id: menu.taskId, reopen: false })}
         onPomodoro={() => menu && void startPomodoro(menu.taskId)}
       />
 
@@ -1414,7 +1458,21 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         onGoalChange={(goal) => detailsId && handleGoalChange(detailsId, goal)}
         onMove={(to) => detailsId && handleMove(detailsId, to)}
         onDelete={() => detailsId && handleDelete(detailsId)}
+        onRedefine={() => {
+          if (!detailsId) return;
+          setDetailsId(null);
+          setRedefine({ id: detailsId, reopen: true });
+        }}
       />
+
+      {redefine && findTask(redefine.id) && (
+        <RedefineDialog
+          key={redefine.id}
+          task={findTask(redefine.id)!.task}
+          onClose={() => closeRedefine()}
+          onConfirm={closeRedefine}
+        />
+      )}
 
       {typeahead && tab === "board" && (
         <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center">

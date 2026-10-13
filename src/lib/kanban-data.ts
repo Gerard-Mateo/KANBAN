@@ -15,7 +15,40 @@ export type Task = {
   goal?: TaskGoal | undefined;
   /** Días del calendario en que se trabajará ("AAAA-MM-DD"), seguidos o no. */
   days?: string[] | undefined;
+  /** Definiciones que tuvo antes de redefinirla, de la más vieja a la más nueva. */
+  redefinitions?: Redefinition[] | undefined;
 };
+
+/** Una definición anterior de la tarea: qué decía, de qué tipo era, cuándo se
+ * reemplazó y por qué (p. ej. "Ya no es relevante"). */
+export type Redefinition = {
+  title: string;
+  type?: string | undefined;
+  at: number;
+  reason?: string | undefined;
+};
+
+/** Redefiniciones válidas y en orden, vengan de la base o de un Excel. */
+export function normalizeRedefinitions(raw: unknown): Redefinition[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Redefinition[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const o = r as Record<string, unknown>;
+    const title = typeof o["title"] === "string" ? o["title"].trim() : "";
+    if (!title) continue;
+    const at = Number(o["at"]);
+    const type = typeof o["type"] === "string" ? o["type"].trim() : "";
+    const reason = typeof o["reason"] === "string" ? o["reason"].trim() : "";
+    out.push({
+      title,
+      at: Number.isFinite(at) ? at : 0,
+      ...(type ? { type } : {}),
+      ...(reason ? { reason } : {}),
+    });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
 
 /** Meta medible opcional: "3 de 10 blogs". */
 export type TaskGoal = { target: number; current: number };

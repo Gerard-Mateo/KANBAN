@@ -3,6 +3,7 @@ import { USE_LOCAL_MYSQL, localApi } from "./local-db";
 import { normalizeDays } from "./calendar";
 import {
   COLUMNS,
+  normalizeRedefinitions,
   type BoardState,
   type ColumnId,
   type MoveEvent,
@@ -23,6 +24,7 @@ type TaskRow = {
   goal_target?: number | null;
   goal_current?: number | null;
   planned_days?: unknown;
+  redefinitions?: unknown;
 };
 
 async function fetchTaskRows(): Promise<TaskRow[]> {
@@ -52,6 +54,8 @@ export async function loadBoard(): Promise<BoardState> {
     };
     const days = normalizeDays(row.planned_days);
     if (days.length) task.days = days;
+    const redefinitions = normalizeRedefinitions(row.redefinitions);
+    if (redefinitions.length) task.redefinitions = redefinitions;
     board[col].push(task);
   }
   return board;
@@ -67,15 +71,20 @@ export async function countTasks(): Promise<number> {
 }
 
 // Columnas que llegaron con migraciones posteriores (metas, días del
-// calendario): solo viajan si alguna tarea las usa, y si la nube aún no tiene
-// la migración se guarda sin ellas en vez de fallar.
-const LATE_COLUMNS = [["goal_target", "goal_current"], ["planned_days"]] as const;
+// calendario, redefiniciones): solo viajan si alguna tarea las usa, y si la
+// nube aún no tiene la migración se guarda sin ellas en vez de fallar.
+const LATE_COLUMNS = [
+  ["goal_target", "goal_current"],
+  ["planned_days"],
+  ["redefinitions"],
+] as const;
 
 /** Reemplaza el tablero completo del usuario en la nube. */
 export async function saveBoard(userId: string, board: BoardState): Promise<void> {
   const tasks = COLUMNS.flatMap((col) => board[col.id]);
   const hasGoals = tasks.some((t) => t.goal);
   const hasDays = tasks.some((t) => t.days?.length);
+  const hasRedefinitions = tasks.some((t) => t.redefinitions?.length);
   let rows = COLUMNS.flatMap((col) =>
     board[col.id].map((task, index) => ({
       user_id: userId,
@@ -89,6 +98,9 @@ export async function saveBoard(userId: string, board: BoardState): Promise<void
         ? { goal_target: task.goal?.target ?? null, goal_current: task.goal?.current ?? 0 }
         : {}),
       ...(hasDays ? { planned_days: task.days ?? [] } : {}),
+      ...(hasRedefinitions
+        ? { redefinitions: (task.redefinitions ?? []) as unknown as never }
+        : {}),
     })),
   );
 

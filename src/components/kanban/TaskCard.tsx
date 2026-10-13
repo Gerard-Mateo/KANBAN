@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, GripVertical, Minus, Plus } from "lucide-react";
+import { Check, GripVertical, Minus, Plus, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { tagsForTask, type Task, type TaskGoal } from "@/lib/kanban-data";
 import { colorOf, typeChipStyle, useCustomTypes, type CustomType } from "@/lib/custom-types";
@@ -156,6 +156,16 @@ export function TaskCardBody({
               {tag.label}
             </span>
           ))}
+          {task.redefinitions?.length ? (
+            <span
+              title={`Redefinida. Antes: ${task.redefinitions[task.redefinitions.length - 1]!.title}`}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-border/70 ring-inset"
+            >
+              <History className="size-3" />
+              Redefinida
+              {task.redefinitions.length > 1 && ` ×${task.redefinitions.length}`}
+            </span>
+          ) : null}
         </div>
         {task.goal && (
           <GoalBar

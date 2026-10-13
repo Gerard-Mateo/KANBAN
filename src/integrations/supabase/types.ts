@@ -211,6 +211,7 @@ export type Database = {
           id: string
           planned_days: string[]
           position: number
+          redefinitions: Json
           title: string
           type: string | null
           updated_at: string
@@ -225,6 +226,7 @@ export type Database = {
           id?: string
           planned_days?: string[]
           position?: number
+          redefinitions?: Json
           title?: string
           type?: string | null
           updated_at?: string
@@ -239,6 +241,7 @@ export type Database = {
           id?: string
           planned_days?: string[]
           position?: number
+          redefinitions?: Json
           title?: string
           type?: string | null
           updated_at?: string

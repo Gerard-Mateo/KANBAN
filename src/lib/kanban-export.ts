@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import {
   clampGoal,
+  normalizeRedefinitions,
   COLUMNS,
   COLUMN_TITLES,
   TYPE_LABELS,
@@ -9,6 +10,7 @@ import {
   type BoardState,
   type ColumnId,
   type MoveEvent,
+  type Redefinition,
   type TagTone,
   type Task,
 } from "./kanban-data";
@@ -146,6 +148,21 @@ export function buildXlsxBuffer(board: BoardState): ArrayBuffer {
   );
   moveSheet["!cols"] = [{ wch: 70 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, moveSheet, "Movimientos");
+
+  // Definiciones anteriores de las tareas redefinidas, ligadas por el título actual.
+  const redefRows = redefinitionRows(board);
+  if (redefRows.length) {
+    const redefSheet = XLSX.utils.json_to_sheet(redefRows);
+    redefSheet["!cols"] = [
+      { wch: 60 },
+      { wch: 60 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 30 },
+    ];
+    XLSX.utils.book_append_sheet(wb, redefSheet, REDEF_SHEET);
+  }
 
   // Tipos personalizados con su color, para recuperarlos al importar.
   const customTypes = getCustomTypes();
@@ -420,6 +437,46 @@ export type ImportResult = {
   okrs: Objective[] | null;
 };
 
+const REDEF_SHEET = "Redefiniciones";
+
+function redefinitionRows(board: BoardState) {
+  return COLUMNS.flatMap((col) =>
+    board[col.id].flatMap((task) =>
+      (task.redefinitions ?? []).map((r) => {
+        const d = new Date(r.at);
+        return {
+          Tarea: task.title,
+          "Definición anterior": r.title,
+          "Tipo anterior": r.type ? typeLabel(r.type) : "",
+          Fecha: d.toLocaleDateString("es-EC"),
+          Hora: d.toLocaleTimeString("es-EC"),
+          Motivo: r.reason ?? "",
+        };
+      }),
+    ),
+  );
+}
+
+function redefinitionsByTitle(rows: Record<string, unknown>[]): Map<string, Redefinition[]> {
+  const raw = new Map<string, unknown[]>();
+  for (const row of rows) {
+    const title = String(row["Tarea"] ?? "").trim();
+    if (!title) continue;
+    const at = parseLocalDate(
+      `${String(row["Fecha"] ?? "").trim()} ${String(row["Hora"] ?? "").trim()}`,
+    );
+    const list = raw.get(title) ?? [];
+    list.push({
+      title: String(row["Definición anterior"] ?? ""),
+      type: typeFromLabel(row["Tipo anterior"]) ?? "",
+      at: at ?? 0,
+      reason: String(row["Motivo"] ?? ""),
+    });
+    raw.set(title, list);
+  }
+  return new Map([...raw].map(([title, list]) => [title, normalizeRedefinitions(list)]));
+}
+
 function historyByTitle(rows: Record<string, unknown>[]): Map<string, MoveEvent[]> {
   const map = new Map<string, MoveEvent[]>();
   for (const row of rows) {
@@ -465,6 +522,15 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
     : [];
   const histories = historyByTitle(moveRowsRaw);
 
+  const redefSheetName = wb.SheetNames.find((n) => norm(n) === norm(REDEF_SHEET));
+  const redefinitions = redefinitionsByTitle(
+    redefSheetName
+      ? XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[redefSheetName]!, {
+          defval: "",
+        })
+      : [],
+  );
+
   const typesSheetName = wb.SheetNames.find((n) => norm(n) === "tipos");
   const types: ImportedType[] = [];
   if (typesSheetName) {
@@ -499,6 +565,7 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
       ...(history?.length ? { history: [...history] } : {}),
       ...(target >= 1 ? { goal: clampGoal({ target, current: Number(row["Avance"]) }) } : {}),
       ...(days.length ? { days } : {}),
+      ...(redefinitions.get(title)?.length ? { redefinitions: redefinitions.get(title)! } : {}),
     };
     moveCount += history?.length ?? 0;
     board[col].push(task);
