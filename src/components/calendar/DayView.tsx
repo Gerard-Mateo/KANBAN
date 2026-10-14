@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -146,7 +146,7 @@ export function DayView({
             }}
           >
             <div className="flex flex-wrap items-center gap-6">
-              <DayRing planned={planned} customTypes={customTypes} bind={tip.bind} />
+              <DayRing planned={planned} bind={tip.bind} />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold tracking-wider text-primary uppercase">
                   {relativeDay(day, today)}
@@ -348,69 +348,74 @@ function StripDay({
 
 /* --------------------------------- Anillo --------------------------------- */
 
-/** Un segmento por tarea en el color de su tipo: lleno y brillante si está
- * hecha, a medias si está en progreso y apenas marcado si falta. */
-function DayRing({
-  planned,
-  customTypes,
-  bind,
-}: {
-  planned: Item[];
-  customTypes: CustomType[];
-  bind: Bind;
-}) {
+/** Un aro de neón que se llena con lo hecho del día (verde al completarlo). */
+function DayRing({ planned, bind }: { planned: Item[]; bind: Bind }) {
+  const glowId = `neon-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const size = 132;
   const r = 54;
-  const sw = 11;
+  const sw = 8;
   const c = 2 * Math.PI * r;
   const n = planned.length;
   const done = planned.filter((p) => p.col === "done").length;
+  const doing = planned.filter((p) => p.col === "doing").length;
   const pct = n ? Math.round((done / n) * 100) : 0;
-  const slot = n ? c / n : c;
-  const gap = n > 1 ? Math.min(4, slot * 0.2) : 0;
+  const color = n > 0 && done === n ? "var(--done)" : "var(--primary)";
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
+    <div
+      className="relative shrink-0"
+      style={{ width: size, height: size }}
+      {...bind(
+        n ? `${done} de ${n} hechas${doing ? ` · ${doing} en progreso` : ""}` : "Nada planificado",
+      )}
+    >
       <svg
         viewBox={`0 0 ${size} ${size}`}
         width={size}
         height={size}
+        overflow="visible"
         role="img"
         aria-label={`${done} de ${n} tareas hechas`}
       >
+        <defs>
+          {/* Dos halos difuminados bajo el trazo: el brillo de neón. */}
+          <filter id={glowId} x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2.5" result="near" />
+            <feGaussianBlur stdDeviation="7" result="far" />
+            <feMerge>
+              <feMergeNode in="far" />
+              <feMergeNode in="near" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
         <circle
           cx={size / 2}
           cy={size / 2}
           r={r}
           fill="none"
-          stroke="var(--border)"
-          strokeWidth={n ? 1 : sw}
-          strokeDasharray={n ? undefined : "3 5"}
-          opacity={0.6}
+          stroke={color}
+          strokeWidth={sw}
+          opacity={0.12}
+          style={{ transition: "stroke 500ms" }}
         />
-        <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-          {planned.map((it, i) => {
-            const { accent } = barColors(it.task, customTypes);
-            return (
-              <circle
-                key={it.task.id}
-                cx={size / 2}
-                cy={size / 2}
-                r={r}
-                fill="none"
-                stroke={accent}
-                strokeWidth={sw}
-                strokeDasharray={`${slot - gap} ${c - slot + gap}`}
-                strokeDashoffset={-(i * slot + gap / 2)}
-                opacity={it.col === "done" ? 1 : it.col === "doing" ? 0.55 : 0.2}
-                style={{
-                  transition: "opacity 400ms",
-                  filter: it.col === "done" ? `drop-shadow(0 0 3px ${accent})` : undefined,
-                }}
-                {...bind(`${it.task.title || "(sin título)"}\n${STATUS_LABEL[it.col]}`)}
-              />
-            );
-          })}
-        </g>
+        {done > 0 && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke={color}
+            strokeWidth={sw}
+            strokeLinecap="round"
+            strokeDasharray={c}
+            strokeDashoffset={c * (1 - done / n)}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+            filter={`url(#${glowId})`}
+            style={{
+              transition: "stroke-dashoffset 700ms cubic-bezier(0.2, 0.8, 0.2, 1), stroke 500ms",
+            }}
+          />
+        )}
       </svg>
       <div className="pointer-events-none absolute inset-0 grid place-content-center text-center">
         <span className="text-3xl font-semibold tracking-tight text-foreground tabular-nums">
