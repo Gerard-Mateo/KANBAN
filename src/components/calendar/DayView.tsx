@@ -1,18 +1,33 @@
-import { useState, type ReactNode } from "react";
-import { useDraggable, useDroppable } from "@dnd-kit/core";
-import { CalendarCheck2, Timer, X } from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
+import { useDroppable } from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { CalendarCheck2, GripVertical, Timer, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CustomType } from "@/lib/custom-types";
 import type { ColumnId, TaskGoal } from "@/lib/kanban-data";
 import { typeOf } from "@/lib/task-stats";
 import { addDays, diffDays, fromIso, runContaining, weekOf, type IsoDay } from "@/lib/calendar";
-import { barColors, longDate, relativeDay, STATUS_LABEL, WEEKDAYS, type Item } from "./calendar-ui";
+import {
+  barColors,
+  dayList,
+  longDate,
+  relativeDay,
+  STATUS_LABEL,
+  WEEKDAYS,
+  type Item,
+} from "./calendar-ui";
 import { StatusCheck } from "./StatusCheck";
 
 /** Arrastrar una tarea de la vista de día mueve solo ese día suyo. */
-export type OccDrag = { kind: "occ"; taskId: string; day: IsoDay };
-
-const ORDER: Record<ColumnId, number> = { doing: 0, todo: 1, done: 2 };
+export type OccDrag = {
+  kind: "occ";
+  taskId: string;
+  day: IsoDay;
+  /** Su grupo (estado): se reordena dentro de él. */
+  group: ColumnId;
+  measure: () => DOMRect | null;
+};
 const GROUP_LABEL: Record<ColumnId, string> = {
   doing: "En progreso",
   todo: "Por hacer",
@@ -80,9 +95,7 @@ export function DayView({
   onSetDays: (taskId: string, days: IsoDay[]) => void;
 }) {
   const tip = useTip();
-  const planned = items
-    .filter((i) => i.task.days?.includes(day))
-    .sort((a, b) => ORDER[a.col] - ORDER[b.col]);
+  const planned = dayList(items, day);
   const count = (c: ColumnId) => planned.filter((p) => p.col === c).length;
   const done = count("done");
   const total = planned.length;
@@ -172,21 +185,27 @@ export function DayView({
                     <StatusCheck col={c} accent="currentColor" size={10} />
                     {GROUP_LABEL[c]} · {list.length}
                   </p>
-                  <div className="space-y-1.5">
-                    {list.map((it) => (
-                      <DayCard
-                        key={it.task.id}
-                        item={it}
-                        day={day}
-                        customTypes={customTypes}
-                        dimmed={draggingTaskId === it.task.id}
-                        onOpen={onOpenTask}
-                        onToggleDone={onToggleDone}
-                        onStartPomodoro={onStartPomodoro}
-                        onRemoveDay={removeDay}
-                      />
-                    ))}
-                  </div>
+                  {/* Arrastrar una tarjeta arriba o abajo la reordena en su grupo. */}
+                  <SortableContext
+                    items={list.map((it) => `occ:${it.task.id}`)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-1.5">
+                      {list.map((it) => (
+                        <DayCard
+                          key={it.task.id}
+                          item={it}
+                          day={day}
+                          customTypes={customTypes}
+                          dimmed={draggingTaskId === it.task.id}
+                          onOpen={onOpenTask}
+                          onToggleDone={onToggleDone}
+                          onStartPomodoro={onStartPomodoro}
+                          onRemoveDay={removeDay}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
                 </div>
               );
             })}
@@ -463,8 +482,65 @@ function DayCard({
   onRemoveDay: (id: string) => void;
 }) {
   const { task, col } = item;
-  const data: OccDrag = { kind: "occ", taskId: task.id, day };
-  const { setNodeRef, attributes, listeners } = useDraggable({ id: `occ:${task.id}`, data });
+  const node = useRef<HTMLDivElement | null>(null);
+  const data: OccDrag = {
+    kind: "occ",
+    taskId: task.id,
+    day,
+    group: col,
+    measure: () => node.current?.getBoundingClientRect() ?? null,
+  };
+  const { setNodeRef, attributes, listeners, transform, transition } = useSortable({
+    id: `occ:${task.id}`,
+    data,
+  });
+  return (
+    <div
+      ref={(el) => {
+        node.current = el;
+        setNodeRef(el);
+      }}
+      {...attributes}
+      {...listeners}
+      onDoubleClick={() => onOpen(task.id)}
+      title="Doble clic para ver detalles · arrástrala arriba o abajo para reordenar, o a otro día de la tira para moverla"
+      className={cn(
+        "cursor-grab rounded-xl outline-none focus-visible:ring-1 focus-visible:ring-primary active:cursor-grabbing",
+        dimmed && "opacity-35",
+      )}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+    >
+      <DayCardBody
+        item={item}
+        day={day}
+        customTypes={customTypes}
+        onToggleDone={onToggleDone}
+        onStartPomodoro={onStartPomodoro}
+        onRemoveDay={onRemoveDay}
+      />
+    </div>
+  );
+}
+
+/** La tarjeta en sí; sin manejadores es la que vuela al arrastrar. */
+export function DayCardBody({
+  item,
+  day,
+  customTypes,
+  lifted,
+  onToggleDone,
+  onStartPomodoro,
+  onRemoveDay,
+}: {
+  item: Item;
+  day: IsoDay;
+  customTypes: CustomType[];
+  lifted?: boolean;
+  onToggleDone?: (id: string) => void;
+  onStartPomodoro?: (id: string) => void;
+  onRemoveDay?: (id: string) => void;
+}) {
+  const { task, col } = item;
   const { style, accent } = barColors(task, customTypes);
   const type = typeOf(task);
   const days = task.days ?? [];
@@ -475,19 +551,24 @@ function DayCard({
 
   return (
     <div
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      onDoubleClick={() => onOpen(task.id)}
-      title="Doble clic para ver detalles · arrástrala a otro día de arriba para moverla"
       className={cn(
-        "group relative flex cursor-grab items-start gap-3 rounded-xl border border-border/60 bg-card/70 py-2.5 pr-2 pl-3.5 outline-none transition-[border-color,background-color,opacity] hover:border-border hover:bg-card focus-visible:ring-1 focus-visible:ring-primary active:cursor-grabbing",
-        dimmed && "opacity-35",
+        "group relative flex items-start gap-3 rounded-xl border border-border/60 bg-card/70 py-2.5 pr-2 pl-3.5 transition-[border-color,background-color] hover:border-border hover:bg-card",
+        lifted && "border-primary bg-card",
       )}
-      style={{ boxShadow: `inset 3px 0 0 ${accent}` }}
+      style={{
+        boxShadow: lifted
+          ? `inset 3px 0 0 ${accent}, 0 12px 32px oklch(0 0 0 / 0.6)`
+          : `inset 3px 0 0 ${accent}`,
+      }}
     >
+      <GripVertical className="absolute top-1/2 left-0.5 size-3 -translate-y-1/2 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/60" />
       <div className="pt-0.5">
-        <StatusCheck col={col} accent={accent} size={18} onToggle={() => onToggleDone(task.id)} />
+        <StatusCheck
+          col={col}
+          accent={accent}
+          size={18}
+          onToggle={onToggleDone && (() => onToggleDone(task.id))}
+        />
       </div>
       <div className="min-w-0 flex-1">
         <p
@@ -507,8 +588,13 @@ function DayCard({
           {task.goal && <GoalMini goal={task.goal} accent={accent} />}
         </div>
       </div>
-      <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-        {col !== "done" && (
+      <div
+        className={cn(
+          "flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100",
+          lifted && "hidden",
+        )}
+      >
+        {col !== "done" && onStartPomodoro && (
           <button
             type="button"
             title="Iniciar pomodoro"
@@ -527,7 +613,7 @@ function DayCard({
           aria-label="Quitar de este día"
           onPointerDown={stop}
           onDoubleClick={stop}
-          onClick={() => onRemoveDay(task.id)}
+          onClick={() => onRemoveDay?.(task.id)}
           className={action}
         >
           <X className="size-3.5" />

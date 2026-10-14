@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import {
   clampGoal,
+  normalizeDayOrder,
   normalizeRedefinitions,
   COLUMNS,
   COLUMN_TITLES,
@@ -28,6 +29,8 @@ type Row = {
   Avance: number | string;
   /** Días del calendario, "2026-10-08, 2026-10-09". */
   Días: string;
+  /** Puesto en cada día, "2026-10-08:0, 2026-10-09:2". */
+  "Orden en el día": string;
 };
 
 type MoveRow = {
@@ -72,6 +75,9 @@ export function boardRows(board: BoardState): Row[] {
         Meta: task.goal?.target ?? "",
         Avance: task.goal ? task.goal.current : "",
         Días: (task.days ?? []).join(", "),
+        "Orden en el día": Object.entries(task.dayOrder ?? {})
+          .map(([d, n]) => `${d}:${n}`)
+          .join(", "),
       });
     }
   }
@@ -138,6 +144,7 @@ export function buildXlsxBuffer(board: BoardState): ArrayBuffer {
     { wch: 6 },
     { wch: 7 },
     { wch: 36 },
+    { wch: 30 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, sheet, "Tareas");
@@ -557,6 +564,13 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
     const history = histories.get(title);
     const target = Number(row["Meta"]);
     const days = parseDays(row["Días"]);
+    const dayOrder = normalizeDayOrder(
+      Object.fromEntries(
+        [...String(row["Orden en el día"] ?? "").matchAll(/(\d{4}-\d{2}-\d{2})\s*:\s*(\d+)/g)].map(
+          (m) => [m[1]!, Number(m[2])],
+        ),
+      ),
+    );
     const task: Task = {
       id: `${col[0]}${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
       title,
@@ -565,6 +579,7 @@ export async function parseBoardFile(file: File): Promise<ImportResult> {
       ...(history?.length ? { history: [...history] } : {}),
       ...(target >= 1 ? { goal: clampGoal({ target, current: Number(row["Avance"]) }) } : {}),
       ...(days.length ? { days } : {}),
+      ...(Object.keys(dayOrder).length ? { dayOrder } : {}),
       ...(redefinitions.get(title)?.length ? { redefinitions: redefinitions.get(title)! } : {}),
     };
     moveCount += history?.length ?? 0;

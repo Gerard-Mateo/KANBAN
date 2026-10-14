@@ -30,6 +30,7 @@ async function migrate() {
     await pool.query("ALTER TABLE tasks ADD COLUMN planned_days JSON NULL");
   if (!have.has("redefinitions"))
     await pool.query("ALTER TABLE tasks ADD COLUMN redefinitions JSON NULL");
+  if (!have.has("day_order")) await pool.query("ALTER TABLE tasks ADD COLUMN day_order JSON NULL");
 }
 let migrated;
 const toDate = (v) => (v ? new Date(v) : null);
@@ -55,10 +56,11 @@ async function saveBoard(userId, rows) {
         r.goal_current ?? 0,
         JSON.stringify(r.planned_days ?? []),
         JSON.stringify(r.redefinitions ?? []),
+        JSON.stringify(r.day_order ?? {}),
       ]);
     if (values.length) {
       await conn.query(
-        "INSERT INTO tasks (id, user_id, title, column_id, position, type, history, created_at, goal_target, goal_current, planned_days, redefinitions) VALUES ?",
+        "INSERT INTO tasks (id, user_id, title, column_id, position, type, history, created_at, goal_target, goal_current, planned_days, redefinitions, day_order) VALUES ?",
         [values],
       );
     }
@@ -75,7 +77,7 @@ const routes = {
   "GET /tasks": async () => {
     const [rows] = await pool.query(
       `SELECT id, title, column_id, position, type, history, created_at, goal_target, goal_current,
-              planned_days, redefinitions
+              planned_days, redefinitions, day_order
        FROM tasks ORDER BY position`,
     );
     return rows;

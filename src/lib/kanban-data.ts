@@ -17,7 +17,20 @@ export type Task = {
   days?: string[] | undefined;
   /** Definiciones que tuvo antes de redefinirla, de la más vieja a la más nueva. */
   redefinitions?: Redefinition[] | undefined;
+  /** Su puesto dentro de cada día del calendario ({ "2026-10-14": 0 }), si se reordenó. */
+  dayOrder?: Record<string, number> | undefined;
 };
+
+/** Puestos válidos por día ("AAAA-MM-DD" → número), vengan de la base o de un Excel. */
+export function normalizeDayOrder(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [day, n] of Object.entries(raw as Record<string, unknown>)) {
+    const v = Number(n);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(v)) out[day] = v;
+  }
+  return out;
+}
 
 /** Una definición anterior de la tarea: qué decía, de qué tipo era, cuándo se
  * reemplazó y por qué (p. ej. "Ya no es relevante"). */

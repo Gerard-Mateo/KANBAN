@@ -101,6 +101,8 @@ export function layoutWeek<T>(
   items: T[],
   daysOf: (item: T) => IsoDay[] | undefined,
   week: IsoDay[],
+  /** Puesto que le diste a la tarea en ese día (menor = más arriba). */
+  rankOf: (item: T, day: IsoDay) => number = () => Number.POSITIVE_INFINITY,
 ): { segments: WeekSegment<T>[]; lanes: number } {
   const first = week[0]!;
   const last = week[week.length - 1]!;
@@ -121,8 +123,13 @@ export function layoutWeek<T>(
       });
     }
   }
-  // Los tramos largos primero en cada columna para que no queden partidos.
-  segments.sort((a, b) => a.startCol - b.startCol || b.endCol - a.endCol);
+  // Por día de inicio; dentro del mismo día, el orden que les diste y luego
+  // los tramos largos primero para que no queden partidos.
+  segments.sort((a, b) => {
+    const ra = rankOf(a.item, week[a.startCol]!);
+    const rb = rankOf(b.item, week[b.startCol]!);
+    return a.startCol - b.startCol || (ra === rb ? 0 : ra < rb ? -1 : 1) || b.endCol - a.endCol;
+  });
   const laneEnds: number[] = [];
   for (const seg of segments) {
     let lane = laneEnds.findIndex((end) => end < seg.startCol);

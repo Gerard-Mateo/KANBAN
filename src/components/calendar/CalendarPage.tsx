@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
+  closestCenter,
   DndContext,
   DragOverlay,
   PointerSensor,
@@ -8,12 +9,14 @@ import {
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { CalendarDays, ChevronLeft, ChevronRight, Copy, Maximize2, Search, X } from "lucide-react";
+import { arrayMove } from "@dnd-kit/sortable";
+import { CalendarDays, ChevronLeft, ChevronRight, Copy, Maximize2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { COLUMNS, type BoardState, type ColumnId } from "@/lib/kanban-data";
+import { COLUMNS, type BoardState } from "@/lib/kanban-data";
 import { useCustomTypes, type CustomType } from "@/lib/custom-types";
 import {
   addDays,
@@ -33,15 +36,19 @@ import {
 import {
   barColors,
   cap,
+  chipKey,
   dayAt,
+  dayList,
   edgeShadow,
   plannedAhead,
+  runKey,
   STATUS_LABEL,
   WEEKDAYS,
   type Item,
 } from "./calendar-ui";
 import { StatusCheck } from "./StatusCheck";
-import { DayView, type OccDrag } from "./DayView";
+import { DayCardBody, DayView, type OccDrag } from "./DayView";
+import { TaskTable } from "./TaskTable";
 
 type View = "month" | "week" | "day";
 type RunRef = { taskId: string; run: IsoDay[] };
@@ -75,6 +82,7 @@ type Resize = { taskId: string; run: IsoDay[]; edge: "start" | "end"; base: IsoD
 type Box = { left: number; top: number; right: number; bottom: number };
 
 const VIEW_KEY = "kanban-calendar-view";
+const LIST_KEY = "kanban-calendar-list-height";
 
 // Medidas de la rejilla: cabecera del día y alto de cada carril de barras.
 const SIZES = {
@@ -84,11 +92,9 @@ const SIZES = {
 const LANE_GAP = 3;
 /** Cuánto más ancho es el día enfocado que los demás en la vista de semana. */
 const FOCUS_SPAN = 2.2;
-// Lo que ocupan la cabecera de la página, los controles y la lista de abajo.
-const CHROME_PX = 360;
-
-const runKey = (taskId: string, start: IsoDay) => `run:${taskId}:${start}`;
-const chipKey = (taskId: string) => `task:${taskId}`;
+// Lo que ocupan la cabecera de la página, los controles y la barra de la
+// lista de abajo (a lo que se suma el alto de sus filas).
+const CHROME_PX = 250;
 const isTyping = (el: Element | null) =>
   !!el?.closest("input, textarea, select, [contenteditable='true']");
 
@@ -125,6 +131,7 @@ export function CalendarPage({
   onOpenTask,
   onToggleDone,
   onStartPomodoro,
+  onSetDayOrder,
 }: {
   board: BoardState;
   /** Si la pestaña está a la vista (los atajos de teclado solo valen entonces). */
@@ -135,6 +142,8 @@ export function CalendarPage({
   /** La casilla de una barra: marca la tarea como hecha o la devuelve. */
   onToggleDone: (taskId: string) => void;
   onStartPomodoro: (taskId: string) => void;
+  /** Guarda el orden de las tareas de un día (de arriba abajo). */
+  onSetDayOrder: (day: IsoDay, taskIds: string[]) => void;
 }) {
   const customTypes = useCustomTypes();
   const today = todayIso();
@@ -150,11 +159,14 @@ export function CalendarPage({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [marquee, setMarquee] = useState<Box | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const [listH, setListH] = useState(168);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(VIEW_KEY);
       if (saved === "week" || saved === "day") setView(saved);
+      const h = Number(localStorage.getItem(LIST_KEY));
+      if (h >= 96) setListH(h);
     } catch {
       /* sin almacenamiento: vista de mes */
     }
@@ -163,6 +175,15 @@ export function CalendarPage({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  function changeListHeight(h: number) {
+    setListH(h);
+    try {
+      localStorage.setItem(LIST_KEY, String(h));
+    } catch {
+      /* no pasa nada si no se recuerda */
+    }
+  }
 
   function changeView(next: View) {
     setView(next);
@@ -193,8 +214,8 @@ export function CalendarPage({
   // resto se resume en puntitos y se ve completo en la vista de semana.
   const rowPx =
     view === "month"
-      ? Math.max(108, (viewportH - CHROME_PX) / weeks.length)
-      : Math.max(320, viewportH - CHROME_PX);
+      ? Math.max(108, (viewportH - CHROME_PX - listH) / weeks.length)
+      : Math.max(320, viewportH - CHROME_PX - listH);
   const laneCap =
     view === "month"
       ? Math.max(1, Math.floor((rowPx - sizes.head - sizes.more - 6) / (sizes.lane + LANE_GAP)))
@@ -252,6 +273,11 @@ export function CalendarPage({
     });
   }
 
+  /** Selección por rango (Mayús+clic en la lista). */
+  function selectKeys(keys: string[], add: boolean) {
+    setSelected((prev) => new Set([...(add ? prev : []), ...keys]));
+  }
+
   function removeRuns(runs: RunRef[]) {
     for (const [taskId, days] of byTask(runs))
       onSetDays(taskId, replaceDays(daysOf(taskId), days, []));
@@ -292,8 +318,15 @@ export function CalendarPage({
     const target = e.target as HTMLElement;
     if (
       target.closest(
-        "[data-sel-key], button, input, textarea, select, a, [role='dialog'], [role='menu']",
+        "[data-sel-key], button, input, textarea, select, a, label, [role='dialog'], [role='menu'], [role='columnheader'], [role='separator']",
       )
+    )
+      return;
+    // Clic sobre una barra de desplazamiento: no es un hueco para seleccionar.
+    const { offsetX, offsetY } = e.nativeEvent;
+    if (
+      (target.clientWidth && offsetX > target.clientWidth) ||
+      (target.clientHeight && offsetY > target.clientHeight)
     )
       return;
     const additive = e.ctrlKey || e.metaKey;
@@ -382,6 +415,27 @@ export function CalendarPage({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
+  // Las tarjetas del día son a la vez destino (para reordenarlas). Solo cuentan
+  // cuando se arrastra otra tarjeta de su mismo día y grupo; sobre la tira de
+  // la semana o la lista de abajo mandan esos.
+  const collision = useMemo<CollisionDetection>(
+    () => (args) => {
+      const data = args.active.data.current as DragData | undefined;
+      const hits = pointerWithin(args).filter((h) => !String(h.id).startsWith("occ:"));
+      if (data?.kind !== "occ") return hits;
+      const home = `day:${data.day}`;
+      const elsewhere = hits.filter((h) => h.id !== home);
+      if (elsewhere.length > 0) return elsewhere;
+      if (!hits.some((h) => h.id === home)) return [];
+      const group = args.droppableContainers.filter((c) => {
+        const d = c.data.current as Partial<OccDrag> | undefined;
+        return d?.kind === "occ" && d.group === data.group;
+      });
+      return closestCenter({ ...args, droppableContainers: group });
+    },
+    [],
+  );
+
   // Ctrl (o Cmd) al soltar copia en vez de mover; se sigue en vivo para que
   // la etiqueta "Copiar" aparezca en cuanto se pulsa.
   const dragging = drag !== null;
@@ -436,6 +490,8 @@ export function CalendarPage({
         runs = selectedRuns;
     } else if (data.kind === "task") {
       if (selected.has(chipKey(data.taskId)) && selectedChips.length > 1) taskIds = selectedChips;
+    } else {
+      width = data.measure()?.width ?? null;
     }
     copyRef.current = pointer.ctrlKey || pointer.metaKey;
     setCopy(copyRef.current);
@@ -464,6 +520,14 @@ export function CalendarPage({
     if (over === "pool") {
       if (d.kind === "run") removeRuns(d.runs ?? [{ taskId: d.taskId, run: d.run }]);
       else if (d.kind === "occ") onSetDays(d.taskId, replaceDays(daysOf(d.taskId), [d.day], []));
+      return;
+    }
+    if (d.kind === "occ" && over.startsWith("occ:")) {
+      // Reordenar dentro del día: se guarda el orden completo del día.
+      const ids = dayList(items, d.day).map((i) => i.task.id);
+      const from = ids.indexOf(d.taskId);
+      const to = ids.indexOf(over.slice(4));
+      if (from >= 0 && to >= 0 && from !== to) onSetDayOrder(d.day, arrayMove(ids, from, to));
       return;
     }
     if (!over.startsWith("day:")) return;
@@ -571,7 +635,7 @@ export function CalendarPage({
     >
       <DndContext
         sensors={sensors}
-        collisionDetection={pointerWithin}
+        collisionDetection={collision}
         onDragStart={handleDragStart}
         onDragOver={(e) => setOverId(e.over ? String(e.over.id) : null)}
         onDragEnd={handleDragEnd}
@@ -724,14 +788,17 @@ export function CalendarPage({
           </div>
         )}
 
-        <Pool
+        <TaskTable
           items={items}
           today={today}
           customTypes={customTypes}
-          drag={drag}
+          removing={drag?.kind === "run" || drag?.kind === "occ"}
+          height={listH}
           selected={selected}
           moving={movingChips}
+          onHeight={changeListHeight}
           onSelect={selectClick}
+          onSelectKeys={selectKeys}
           onOpen={openTask}
           onToggleDone={onToggleDone}
         />
@@ -740,7 +807,7 @@ export function CalendarPage({
           {drag && activeItem ? (
             <div
               className="relative cursor-grabbing"
-              style={drag.kind === "run" && drag.width ? { width: drag.width } : undefined}
+              style={drag.kind !== "task" && drag.width ? { width: drag.width } : undefined}
             >
               {/* El resto del grupo viaja apilado debajo, como en el tablero. */}
               {Array.from({ length: Math.min(groupSize - 1, 3) }, (_, i) => i + 1)
@@ -757,7 +824,9 @@ export function CalendarPage({
                   />
                 ))}
               <div className="relative">
-                {drag.kind === "run" ? (
+                {drag.kind === "occ" ? (
+                  <DayCardBody item={activeItem} day={drag.day} customTypes={customTypes} lifted />
+                ) : drag.kind === "run" ? (
                   <BarBody
                     item={activeItem}
                     customTypes={customTypes}
@@ -852,7 +921,12 @@ function WeekRow({
   onShowWeek: (day: IsoDay) => void;
 }) {
   const sizes = SIZES[view];
-  const { segments, lanes } = layoutWeek(items, (i) => i.task.days, week);
+  const { segments, lanes } = layoutWeek(
+    items,
+    (i) => i.task.days,
+    week,
+    (i, day) => i.task.dayOrder?.[day] ?? Number.POSITIVE_INFINITY,
+  );
   const shown = Math.min(lanes, laneCap);
   const hiddenPerDay = week.map((_, c) =>
     segments
@@ -1323,185 +1397,5 @@ function ChipBody({
         </span>
       )}
     </div>
-  );
-}
-
-function PoolChip({
-  item,
-  today,
-  customTypes,
-  selected,
-  dimmed,
-  onSelect,
-  onOpen,
-  onToggleDone,
-}: {
-  item: Item;
-  today: IsoDay;
-  customTypes: CustomType[];
-  selected: boolean;
-  dimmed: boolean;
-  onSelect: (key: string, e: React.MouseEvent) => void;
-  onOpen: (id: string) => void;
-  onToggleDone: (id: string) => void;
-}) {
-  const data: DragData = { kind: "task", taskId: item.task.id };
-  const { setNodeRef, attributes, listeners } = useDraggable({
-    id: `task:${item.task.id}`,
-    data,
-  });
-  const days = item.task.days ?? [];
-  const key = chipKey(item.task.id);
-  return (
-    <div
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      data-sel-key={key}
-      onClick={(e) => onSelect(key, e)}
-      onDoubleClick={() => onOpen(item.task.id)}
-      title={
-        days.length
-          ? `${item.task.title}\nPlanificada: ${days.map((d) => fromIso(d).toLocaleDateString("es", { weekday: "short", day: "numeric", month: "short" })).join(", ")}`
-          : item.task.title
-      }
-      className={cn(
-        "min-w-0 cursor-grab rounded-md outline-none focus-visible:ring-1 focus-visible:ring-primary active:cursor-grabbing",
-        selected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
-        dimmed && "opacity-35",
-      )}
-    >
-      <ChipBody
-        item={item}
-        today={today}
-        customTypes={customTypes}
-        onToggleDone={() => onToggleDone(item.task.id)}
-      />
-    </div>
-  );
-}
-
-function Pool({
-  items,
-  today,
-  customTypes,
-  drag,
-  selected,
-  moving,
-  onSelect,
-  onOpen,
-  onToggleDone,
-}: {
-  items: Item[];
-  today: IsoDay;
-  customTypes: CustomType[];
-  drag: Drag | null;
-  selected: Set<string>;
-  moving: Set<string>;
-  onSelect: (key: string, e: React.MouseEvent) => void;
-  onOpen: (id: string) => void;
-  onToggleDone: (id: string) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [cols, setCols] = useState<Set<ColumnId>>(() => new Set(["todo", "doing"]));
-  const [hidePlanned, setHidePlanned] = useState(false);
-  const { setNodeRef, isOver } = useDroppable({ id: "pool" });
-
-  const q = query.trim().toLowerCase();
-  const open = items.filter((i) => i.col !== "done");
-  const visible = open.filter(
-    (i) =>
-      cols.has(i.col) &&
-      (!q || i.task.title.toLowerCase().includes(q)) &&
-      !(hidePlanned && plannedAhead(i.task, today)),
-  );
-  const unplanned = open.filter((i) => !plannedAhead(i.task, today)).length;
-  const removing = drag?.kind === "run" || drag?.kind === "occ";
-
-  const toggle = (c: ColumnId) =>
-    setCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(c)) next.delete(c);
-      else next.add(c);
-      return next;
-    });
-
-  const pill = (on: boolean) =>
-    cn(
-      "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
-      on
-        ? "border-accent bg-accent/15 text-accent"
-        : "border-border/60 text-muted-foreground hover:text-foreground",
-    );
-
-  return (
-    <section
-      ref={setNodeRef}
-      className={cn(
-        "sticky bottom-0 z-20 -mx-4 mt-4 border-t border-border bg-background/95 px-4 pt-2.5 pb-3 backdrop-blur transition-colors sm:-mx-6 sm:px-6",
-        removing && "border-dashed",
-        removing && isOver && "bg-destructive/10",
-      )}
-    >
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <span className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
-          Tareas
-        </span>
-        <span className="text-[11px] text-muted-foreground">
-          {unplanned} sin planificar de {open.length}
-        </span>
-        {(["todo", "doing"] as const).map((c) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => toggle(c)}
-            className={cn(pill(cols.has(c)), "inline-flex items-center gap-1.5")}
-          >
-            <StatusCheck col={c} accent="currentColor" size={11} />
-            {STATUS_LABEL[c]} · {open.filter((i) => i.col === c).length}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => setHidePlanned((v) => !v)}
-          className={pill(hidePlanned)}
-        >
-          Ocultar planificadas
-        </button>
-        <div className="relative ml-auto w-56">
-          <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar tarea…"
-            className="w-full rounded-md border border-border/60 bg-card/60 py-1 pr-2 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-accent/60"
-          />
-        </div>
-      </div>
-      {removing ? (
-        <p className="grid h-14 place-items-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
-          Suelta aquí para quitarlas del calendario
-        </p>
-      ) : (
-        <div className="flex max-h-[7.5rem] flex-wrap gap-1.5 overflow-y-auto">
-          {visible.map((i) => (
-            <PoolChip
-              key={i.task.id}
-              item={i}
-              today={today}
-              customTypes={customTypes}
-              selected={selected.has(chipKey(i.task.id))}
-              dimmed={moving.has(i.task.id)}
-              onSelect={onSelect}
-              onOpen={onOpen}
-              onToggleDone={onToggleDone}
-            />
-          ))}
-          {visible.length === 0 && (
-            <p className="py-1 text-xs text-muted-foreground">No hay tareas con estos filtros.</p>
-          )}
-        </div>
-      )}
-    </section>
   );
 }

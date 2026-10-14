@@ -205,6 +205,7 @@ export type Database = {
         Row: {
           column_id: string
           created_at: string
+          day_order: Json
           goal_current: number
           goal_target: number | null
           history: Json
@@ -220,6 +221,7 @@ export type Database = {
         Insert: {
           column_id: string
           created_at?: string
+          day_order?: Json
           goal_current?: number
           goal_target?: number | null
           history?: Json
@@ -235,6 +237,7 @@ export type Database = {
         Update: {
           column_id?: string
           created_at?: string
+          day_order?: Json
           goal_current?: number
           goal_target?: number | null
           history?: Json

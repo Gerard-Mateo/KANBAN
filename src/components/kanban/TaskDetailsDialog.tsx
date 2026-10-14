@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CalendarClock, Hash, Layers, History, Target, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBackdropClose } from "@/hooks/use-backdrop-close";
@@ -35,6 +35,17 @@ export function TaskDetailsDialog({
 }) {
   const [title, setTitle] = useState(task?.title ?? "");
   const titleRef = useRef<HTMLTextAreaElement>(null);
+
+  // El título crece con su texto para leerse entero; solo los muy largos
+  // (más de ~45% de la pantalla) quedan con barra de desplazamiento.
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const max = Math.round(window.innerHeight * 0.45);
+    el.style.height = `${Math.min(el.scrollHeight + 2, max)}px`;
+    el.style.overflowY = el.scrollHeight + 2 > max ? "auto" : "hidden";
+  }, [title, task?.id]);
 
   useEffect(() => setTitle(task?.title ?? ""), [task?.id]);
 
@@ -74,7 +85,7 @@ export function TaskDetailsDialog({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="glass-panel max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl p-5 shadow-2xl"
+        className="glass-panel max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl p-5 shadow-2xl"
       >
         <div className="mb-4 flex items-start gap-3">
           <h3 className="font-display text-lg font-semibold tracking-tight text-foreground">
@@ -117,8 +128,8 @@ export function TaskDetailsDialog({
               onClose();
             }
           }}
-          rows={3}
-          className="mb-4 w-full resize-none rounded-xl border border-border/70 bg-card/60 p-3 text-sm text-card-foreground outline-none focus:border-accent/60"
+          rows={2}
+          className="mb-4 w-full resize-none rounded-xl border border-border/70 bg-card/60 p-3 text-[15px] leading-relaxed text-card-foreground outline-none focus:border-accent/60"
         />
 
         {task.redefinitions?.length ? <PastDefinitions list={task.redefinitions} /> : null}

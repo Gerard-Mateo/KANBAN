@@ -457,9 +457,29 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
       const col = findColumn(prev, id);
       const task = col && prev[col].find((t) => t.id === id);
       if (!col || !task || (task.days ?? []).join() === days.join()) return prev;
-      const { days: _old, ...rest } = task;
-      const updated: Task = days.length ? { ...rest, days } : rest;
+      const { days: _old, dayOrder, ...rest } = task;
+      const keep = Object.entries(dayOrder ?? {}).filter(([d]) => days.includes(d));
+      const updated: Task = {
+        ...rest,
+        ...(days.length ? { days } : {}),
+        ...(keep.length ? { dayOrder: Object.fromEntries(keep) } : {}),
+      };
       return { ...prev, [col]: prev[col].map((t) => (t.id === id ? updated : t)) };
+    });
+  }, []);
+
+  // Orden de las tareas dentro de un día del calendario (de arriba abajo).
+  const handleSetDayOrder = useCallback((day: string, ids: string[]) => {
+    const rank = new Map(ids.map((id, i) => [id, i]));
+    setBoard((prev) => {
+      const next = { ...prev } as BoardState;
+      for (const c of COLUMNS)
+        next[c.id] = prev[c.id].map((t) =>
+          rank.has(t.id)
+            ? { ...t, dayOrder: { ...(t.dayOrder ?? {}), [day]: rank.get(t.id)! } }
+            : t,
+        );
+      return next;
     });
   }, []);
 
@@ -1377,6 +1397,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
             onOpenTask={setDetailsId}
             onToggleDone={toggleTaskDone}
             onStartPomodoro={(id) => void startPomodoro(id)}
+            onSetDayOrder={handleSetDayOrder}
           />
         </div>
 

@@ -3,6 +3,7 @@ import { USE_LOCAL_MYSQL, localApi } from "./local-db";
 import { normalizeDays } from "./calendar";
 import {
   COLUMNS,
+  normalizeDayOrder,
   normalizeRedefinitions,
   type BoardState,
   type ColumnId,
@@ -25,6 +26,7 @@ type TaskRow = {
   goal_current?: number | null;
   planned_days?: unknown;
   redefinitions?: unknown;
+  day_order?: unknown;
 };
 
 async function fetchTaskRows(): Promise<TaskRow[]> {
@@ -56,6 +58,8 @@ export async function loadBoard(): Promise<BoardState> {
     if (days.length) task.days = days;
     const redefinitions = normalizeRedefinitions(row.redefinitions);
     if (redefinitions.length) task.redefinitions = redefinitions;
+    const dayOrder = normalizeDayOrder(row.day_order);
+    if (Object.keys(dayOrder).length) task.dayOrder = dayOrder;
     board[col].push(task);
   }
   return board;
@@ -77,6 +81,7 @@ const LATE_COLUMNS = [
   ["goal_target", "goal_current"],
   ["planned_days"],
   ["redefinitions"],
+  ["day_order"],
 ] as const;
 
 /** Reemplaza el tablero completo del usuario en la nube. */
@@ -85,6 +90,7 @@ export async function saveBoard(userId: string, board: BoardState): Promise<void
   const hasGoals = tasks.some((t) => t.goal);
   const hasDays = tasks.some((t) => t.days?.length);
   const hasRedefinitions = tasks.some((t) => t.redefinitions?.length);
+  const hasDayOrder = tasks.some((t) => t.dayOrder && Object.keys(t.dayOrder).length);
   let rows = COLUMNS.flatMap((col) =>
     board[col.id].map((task, index) => ({
       user_id: userId,
@@ -101,6 +107,7 @@ export async function saveBoard(userId: string, board: BoardState): Promise<void
       ...(hasRedefinitions
         ? { redefinitions: (task.redefinitions ?? []) as unknown as never }
         : {}),
+      ...(hasDayOrder ? { day_order: (task.dayOrder ?? {}) as unknown as never } : {}),
     })),
   );
 

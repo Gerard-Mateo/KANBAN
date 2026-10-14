@@ -75,3 +75,29 @@ export function longDate(day: IsoDay, today: IsoDay): string {
     }),
   );
 }
+
+/** Claves de selección: un tramo del calendario o una tarea de la lista. */
+export const runKey = (taskId: string, start: IsoDay) => `run:${taskId}:${start}`;
+export const chipKey = (taskId: string) => `task:${taskId}`;
+
+const STATUS_ORDER: Record<ColumnId, number> = { doing: 0, todo: 1, done: 2 };
+
+/** Las tareas de un día en el orden en que se muestran: en progreso, por
+ * hacer y hechas; dentro de cada grupo, el orden que les diste (las nunca
+ * ordenadas al final, en el orden del tablero). */
+export function dayList(items: Item[], day: IsoDay): Item[] {
+  const rank = (it: Item) => it.task.dayOrder?.[day] ?? Number.POSITIVE_INFINITY;
+  return items
+    .map((it, i) => ({ it, i }))
+    .filter(({ it }) => it.task.days?.includes(day))
+    .sort((a, b) => {
+      const ra = rank(a.it);
+      const rb = rank(b.it);
+      return (
+        STATUS_ORDER[a.it.col] - STATUS_ORDER[b.it.col] ||
+        (ra === rb ? 0 : ra < rb ? -1 : 1) ||
+        a.i - b.i
+      );
+    })
+    .map(({ it }) => it);
+}
