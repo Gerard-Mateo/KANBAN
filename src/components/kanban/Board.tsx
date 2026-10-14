@@ -1372,9 +1372,11 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         <div className={tab === "calendar" ? undefined : "hidden"}>
           <CalendarPage
             board={board}
+            active={tab === "calendar"}
             onSetDays={handleSetDays}
             onOpenTask={setDetailsId}
             onToggleDone={toggleTaskDone}
+            onStartPomodoro={(id) => void startPomodoro(id)}
           />
         </div>
 

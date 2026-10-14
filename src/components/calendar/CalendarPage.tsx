@@ -11,10 +11,10 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Copy, Search, X } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Copy, Maximize2, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { COLUMNS, tagsForTask, type BoardState, type ColumnId, type Task } from "@/lib/kanban-data";
-import { chipCss, colorOf, dotCss, useCustomTypes, type CustomType } from "@/lib/custom-types";
+import { COLUMNS, type BoardState, type ColumnId } from "@/lib/kanban-data";
+import { useCustomTypes, type CustomType } from "@/lib/custom-types";
 import {
   addDays,
   diffDays,
@@ -23,15 +23,28 @@ import {
   monthWeeks,
   rangeDays,
   replaceDays,
+  runsOf,
   toIso,
   todayIso,
   weekOf,
   type IsoDay,
   type WeekSegment,
 } from "@/lib/calendar";
+import {
+  barColors,
+  cap,
+  dayAt,
+  edgeShadow,
+  plannedAhead,
+  STATUS_LABEL,
+  WEEKDAYS,
+  type Item,
+} from "./calendar-ui";
+import { StatusCheck } from "./StatusCheck";
+import { DayView, type OccDrag } from "./DayView";
 
-type Item = { task: Task; col: ColumnId };
-type View = "month" | "week";
+type View = "month" | "week" | "day";
+type RunRef = { taskId: string; run: IsoDay[] };
 
 type DragData =
   | { kind: "task"; taskId: string }
@@ -44,21 +57,24 @@ type DragData =
       shownDays: number;
       /** dnd-kit aún no ha medido la barra al empezar: se mide aquí. */
       measure: () => DOMRect | null;
-    };
+    }
+  | OccDrag;
 
-/** Lo que se arrastra, con el día del tramo que quedó bajo el puntero. */
-type Drag = DragData & { grabDay: IsoDay | null; width: number | null };
+/** Lo que se arrastra: el día del tramo que quedó bajo el puntero y, si era
+ * parte de una selección, todo el grupo que viaja con él. */
+type Drag = DragData & {
+  grabDay: IsoDay | null;
+  width: number | null;
+  /** Tramos seleccionados que se mueven juntos (incluye el arrastrado). */
+  runs: RunRef[] | null;
+  /** Tareas de la lista seleccionadas que se sueltan juntas. */
+  taskIds: string[] | null;
+};
 
 type Resize = { taskId: string; run: IsoDay[]; edge: "start" | "end"; base: IsoDay[] };
+type Box = { left: number; top: number; right: number; bottom: number };
 
 const VIEW_KEY = "kanban-calendar-view";
-const WEEKDAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
-const NEUTRAL_TONES = new Set(["module", "other"]);
-const STATUS_LABEL: Record<ColumnId, string> = {
-  todo: "Por hacer",
-  doing: "En progreso",
-  done: "Hecha",
-};
 
 // Medidas de la rejilla: cabecera del día y alto de cada carril de barras.
 const SIZES = {
@@ -66,19 +82,15 @@ const SIZES = {
   week: { head: 40, lane: 30, more: 18 },
 } as const;
 const LANE_GAP = 3;
-/** Cuánto más ancho es hoy que los demás días en la vista de semana. */
-const TODAY_SPAN = 2.2;
+/** Cuánto más ancho es el día enfocado que los demás en la vista de semana. */
+const FOCUS_SPAN = 2.2;
 // Lo que ocupan la cabecera de la página, los controles y la lista de abajo.
 const CHROME_PX = 360;
 
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-const LIFT_SHADOW = "0 8px 24px oklch(0 0 0 / 0.6), 0 0 0 1px var(--primary)";
-
-/** Franja de color del tipo a la izquierda (y la sombra de "levantada" al arrastrar). */
-const edgeShadow = (accent: string, edge: boolean, lifted: boolean) =>
-  [edge ? `inset 2px 0 0 ${accent}` : "", lifted ? LIFT_SHADOW : ""].filter(Boolean).join(", ") ||
-  undefined;
+const runKey = (taskId: string, start: IsoDay) => `run:${taskId}:${start}`;
+const chipKey = (taskId: string) => `task:${taskId}`;
+const isTyping = (el: Element | null) =>
+  !!el?.closest("input, textarea, select, [contenteditable='true']");
 
 function monthLabel(anchor: IsoDay) {
   return cap(fromIso(anchor).toLocaleDateString("es", { month: "long", year: "numeric" }));
@@ -93,46 +105,36 @@ function weekLabel(week: IsoDay[]) {
     : `${a.getDate()} ${month(a)} – ${b.getDate()} ${month(b)} ${b.getFullYear()}`;
 }
 
-/** Color de la barra: el del tipo de la tarea, o gris para los tipos neutros. */
-/** El día de la rejilla que hay bajo ese punto de la pantalla. */
-function dayAt(x: number, y: number): IsoDay | undefined {
-  const hit = document
-    .elementsFromPoint(x, y)
-    .find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset["day"]);
-  return hit?.dataset["day"];
+function byTask(runs: RunRef[]): Map<string, IsoDay[]> {
+  const out = new Map<string, IsoDay[]>();
+  for (const r of runs) out.set(r.taskId, [...(out.get(r.taskId) ?? []), ...r.run]);
+  return out;
 }
 
-function barColors(
-  task: Task,
-  customTypes: CustomType[],
-): { style: CSSProperties; accent: string } {
-  const tone = tagsForTask(task)[0]?.tone;
-  if (!tone || NEUTRAL_TONES.has(tone)) {
-    return {
-      style: { backgroundColor: "var(--secondary)", color: "var(--foreground)" },
-      accent: "var(--muted-foreground)",
-    };
-  }
-  const c = colorOf(tone, customTypes);
-  return { style: chipCss(c), accent: dotCss(c) };
-}
-
-function plannedAhead(task: Task, today: IsoDay) {
-  return (task.days ?? []).some((d) => d >= today);
-}
+const HINTS: Record<View, string> = {
+  month:
+    "Clic en un día para acercarte · arrastra en vacío para seleccionar varias · estira las barras por sus bordes · Ctrl al soltar copia",
+  week: "Clic en un día para enfocarlo y en su número para abrirlo · arrastra en vacío para seleccionar varias · Supr las quita",
+  day: "Arrastra una tarea a otro día de la semana para moverla · ← → cambian de día",
+};
 
 export function CalendarPage({
   board,
+  active,
   onSetDays,
   onOpenTask,
   onToggleDone,
+  onStartPomodoro,
 }: {
   board: BoardState;
+  /** Si la pestaña está a la vista (los atajos de teclado solo valen entonces). */
+  active: boolean;
   /** Debe ser estable (useCallback): lo usa el estirado mientras dura. */
   onSetDays: (taskId: string, days: IsoDay[]) => void;
   onOpenTask: (taskId: string) => void;
   /** La casilla de una barra: marca la tarea como hecha o la devuelve. */
   onToggleDone: (taskId: string) => void;
+  onStartPomodoro: (taskId: string) => void;
 }) {
   const customTypes = useCustomTypes();
   const today = todayIso();
@@ -145,10 +147,14 @@ export function CalendarPage({
   const justDragged = useRef(false);
   const [resize, setResize] = useState<Resize | null>(null);
   const [viewportH, setViewportH] = useState(900);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [marquee, setMarquee] = useState<Box | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     try {
-      if (localStorage.getItem(VIEW_KEY) === "week") setView("week");
+      const saved = localStorage.getItem(VIEW_KEY);
+      if (saved === "week" || saved === "day") setView(saved);
     } catch {
       /* sin almacenamiento: vista de mes */
     }
@@ -160,6 +166,7 @@ export function CalendarPage({
 
   function changeView(next: View) {
     setView(next);
+    if (next === "day") setSelected(new Set());
     try {
       localStorage.setItem(VIEW_KEY, next);
     } catch {
@@ -173,15 +180,17 @@ export function CalendarPage({
   );
   const byId = useMemo(() => new Map(items.map((i) => [i.task.id, i])), [items]);
   const scheduled = useMemo(() => items.filter((i) => i.task.days?.length), [items]);
+  const daysOf = (id: string) => byId.get(id)?.task.days ?? [];
 
   const anchorDate = fromIso(anchor);
+  const grid = view === "day" ? "week" : view;
   const weeks =
     view === "month"
       ? monthWeeks(anchorDate.getFullYear(), anchorDate.getMonth())
       : [weekOf(anchor)];
-  const sizes = SIZES[view];
+  const sizes = SIZES[grid];
   // En el mes caben tantos carriles como deja la altura de la pantalla; el
-  // resto se resume en "+N" y se ve completo en la vista de semana.
+  // resto se resume en puntitos y se ve completo en la vista de semana.
   const rowPx =
     view === "month"
       ? Math.max(108, (viewportH - CHROME_PX) / weeks.length)
@@ -192,20 +201,189 @@ export function CalendarPage({
       : Infinity;
 
   const showingToday =
-    weeks.some((w) => w.includes(today)) &&
-    (view === "week" || anchorDate.getMonth() === fromIso(today).getMonth());
+    view === "day"
+      ? anchor === today
+      : view === "week"
+        ? weekOf(anchor).includes(today)
+        : anchor.slice(0, 7) === today.slice(0, 7);
 
   function shift(dir: 1 | -1) {
-    if (view === "week") setAnchor(addDays(anchor, 7 * dir));
+    if (view === "day") setAnchor(addDays(anchor, dir));
+    else if (view === "week") setAnchor(addDays(anchor, 7 * dir));
     else setAnchor(toIso(new Date(anchorDate.getFullYear(), anchorDate.getMonth() + dir, 1)));
   }
+
+  function openDay(day: IsoDay) {
+    setAnchor(day);
+    changeView("day");
+  }
+
+  /* ------------------------------ Selección ------------------------------ */
+  // Como en el tablero: clic selecciona una, Ctrl+clic suma o quita, arrastrar
+  // en vacío dibuja un rectángulo y doble clic abre los detalles.
+
+  const selectedRuns = useMemo<RunRef[]>(
+    () =>
+      scheduled.flatMap((i) =>
+        runsOf(i.task.days ?? [])
+          .filter((r) => selected.has(runKey(i.task.id, r[0]!)))
+          .map((run) => ({ taskId: i.task.id, run })),
+      ),
+    [scheduled, selected],
+  );
+  const selectedChips = useMemo(
+    () => items.filter((i) => selected.has(chipKey(i.task.id))).map((i) => i.task.id),
+    [items, selected],
+  );
+
+  function selectClick(key: string, e: React.MouseEvent) {
+    // El segundo clic de un doble clic no debe deshacer la selección.
+    if (justDragged.current || e.detail > 1) return;
+    const additive = e.ctrlKey || e.metaKey;
+    setSelected((prev) => {
+      if (additive) {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      }
+      if (prev.size === 1 && prev.has(key)) return new Set();
+      return new Set([key]);
+    });
+  }
+
+  function removeRuns(runs: RunRef[]) {
+    for (const [taskId, days] of byTask(runs))
+      onSetDays(taskId, replaceDays(daysOf(taskId), days, []));
+  }
+
+  function moveRuns(runs: RunRef[], delta: number, keep: boolean) {
+    for (const [taskId, days] of byTask(runs))
+      onSetDays(
+        taskId,
+        replaceDays(
+          daysOf(taskId),
+          keep ? [] : days,
+          days.map((d) => addDays(d, delta)),
+        ),
+      );
+  }
+
+  // Rectángulo de selección: arranca en un hueco (no en una barra ni un botón).
+  // Si el ratón no se mueve es un clic: en un día, acerca la vista a ese día.
+  const press = useRef<{
+    x: number;
+    y: number;
+    base: Set<string>;
+    target: HTMLElement;
+    additive: boolean;
+    moved: boolean;
+  } | null>(null);
+  const onDayClick = useRef<(day: IsoDay) => void>(() => {});
+  onDayClick.current = (day) => {
+    if (view === "month") {
+      setAnchor(day);
+      changeView("week");
+    } else if (view === "week") setAnchor(day);
+  };
+
+  function handleMouseDown(e: React.MouseEvent) {
+    if (e.button !== 0 || view === "day") return;
+    const target = e.target as HTMLElement;
+    if (
+      target.closest(
+        "[data-sel-key], button, input, textarea, select, a, [role='dialog'], [role='menu']",
+      )
+    )
+      return;
+    const additive = e.ctrlKey || e.metaKey;
+    press.current = {
+      x: e.clientX,
+      y: e.clientY,
+      base: additive ? new Set(selected) : new Set(),
+      target,
+      additive,
+      moved: false,
+    };
+  }
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const p = press.current;
+      if (!p) return;
+      if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 5) return;
+      p.moved = true;
+      const box = {
+        left: Math.min(p.x, e.clientX),
+        right: Math.max(p.x, e.clientX),
+        top: Math.min(p.y, e.clientY),
+        bottom: Math.max(p.y, e.clientY),
+      };
+      setMarquee(box);
+      const hit = new Set(p.base);
+      rootRef.current?.querySelectorAll<HTMLElement>("[data-sel-key]").forEach((el) => {
+        const r = el.getBoundingClientRect();
+        const key = el.dataset["selKey"];
+        if (
+          key &&
+          r.right >= box.left &&
+          r.left <= box.right &&
+          r.bottom >= box.top &&
+          r.top <= box.bottom
+        )
+          hit.add(key);
+      });
+      setSelected(hit);
+    };
+    const onUp = () => {
+      const p = press.current;
+      press.current = null;
+      if (!p) return;
+      if (p.moved) {
+        setMarquee(null);
+        return;
+      }
+      if (!p.additive) setSelected(new Set());
+      const day = p.target.closest<HTMLElement>("[data-day]")?.dataset["day"];
+      if (day) onDayClick.current(day);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  // Atajos de la pestaña: Esc limpia, Supr quita del calendario lo
+  // seleccionado y las flechas cambian de mes, semana o día.
+  const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
+  onKey.current = (e) => {
+    if (isTyping(document.activeElement) || document.querySelector("[role='dialog']")) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || resize) return;
+    if (e.key === "Escape") setSelected(new Set());
+    else if ((e.key === "Delete" || e.key === "Backspace") && selectedRuns.length > 0) {
+      e.preventDefault();
+      removeRuns(selectedRuns);
+      setSelected(new Set());
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      shift(e.key === "ArrowLeft" ? -1 : 1);
+    }
+  };
+  useEffect(() => {
+    if (!active) return;
+    const handler = (e: KeyboardEvent) => onKey.current(e);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active]);
 
   /* ------------------------------ Arrastrar ------------------------------ */
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  // Ctrl (o Cmd) al soltar copia el tramo en vez de moverlo; se sigue en vivo
-  // para que la etiqueta "Copiar" aparezca en cuanto se pulsa.
+  // Ctrl (o Cmd) al soltar copia en vez de mover; se sigue en vivo para que
+  // la etiqueta "Copiar" aparezca en cuanto se pulsa.
   const dragging = drag !== null;
   useEffect(() => {
     if (!dragging) return;
@@ -224,11 +402,13 @@ export function CalendarPage({
     };
   }, [dragging]);
 
-  /** Días que recibiría la tarea al soltarla sobre `day`. */
+  /** Días que recibirían las tareas al soltarlas sobre `day`. */
   function targetDays(d: Drag, day: IsoDay): IsoDay[] {
-    if (d.kind === "task" || !d.grabDay) return [day];
+    if (d.kind !== "run" || !d.grabDay) return [day];
     const delta = diffDays(day, d.grabDay);
-    return d.run.map((x) => addDays(x, delta));
+    return (d.runs ?? [{ taskId: d.taskId, run: d.run }]).flatMap((r) =>
+      r.run.map((x) => addDays(x, delta)),
+    );
   }
 
   function handleDragStart(e: DragStartEvent) {
@@ -237,25 +417,33 @@ export function CalendarPage({
     const pointer = e.activatorEvent as PointerEvent;
     let grabDay: IsoDay | null = null;
     let width: number | null = null;
-    const rect = data.kind === "run" ? data.measure() : null;
-    if (data.kind === "run" && rect) {
-      // Qué día de la barra se agarró (el que está bajo el puntero, porque en la
-      // semana hoy es más ancho): así el tramo se mueve desde ese punto.
-      width = rect.width;
-      const under = dayAt(pointer.clientX, pointer.clientY);
-      if (under && data.run.includes(under)) grabDay = under;
-      else {
-        const col = Math.floor(((pointer.clientX - rect.left) / rect.width) * data.shownDays);
-        grabDay = addDays(data.firstShown, Math.min(data.shownDays - 1, Math.max(0, col)));
+    let runs: RunRef[] | null = null;
+    let taskIds: string[] | null = null;
+    if (data.kind === "run") {
+      const rect = data.measure();
+      if (rect) {
+        // Qué día de la barra se agarró (el que está bajo el puntero, porque en
+        // la semana el día enfocado es más ancho): el tramo se mueve desde ahí.
+        width = rect.width;
+        const under = dayAt(pointer.clientX, pointer.clientY);
+        if (under && data.run.includes(under)) grabDay = under;
+        else {
+          const col = Math.floor(((pointer.clientX - rect.left) / rect.width) * data.shownDays);
+          grabDay = addDays(data.firstShown, Math.min(data.shownDays - 1, Math.max(0, col)));
+        }
       }
+      if (selected.has(runKey(data.taskId, data.run[0]!)) && selectedRuns.length > 1)
+        runs = selectedRuns;
+    } else if (data.kind === "task") {
+      if (selected.has(chipKey(data.taskId)) && selectedChips.length > 1) taskIds = selectedChips;
     }
     copyRef.current = pointer.ctrlKey || pointer.metaKey;
     setCopy(copyRef.current);
-    setDrag({ ...data, grabDay, width });
+    setDrag({ ...data, grabDay, width, runs, taskIds });
   }
 
   // El clic que llega justo después de soltar (o de estirar, si el puntero
-  // acaba encima de la barra) no debe abrir los detalles.
+  // acaba encima de la barra) no debe seleccionar ni abrir nada.
   function swallowClick() {
     justDragged.current = true;
     setTimeout(() => (justDragged.current = false), 0);
@@ -271,24 +459,56 @@ export function CalendarPage({
     const d = drag;
     finishDrag();
     if (!d || !e.over) return;
-    const item = byId.get(d.taskId);
-    if (!item) return;
-    const days = item.task.days ?? [];
     const over = String(e.over.id);
+    const keep = copyRef.current;
     if (over === "pool") {
-      if (d.kind === "run") onSetDays(d.taskId, replaceDays(days, d.run, []));
+      if (d.kind === "run") removeRuns(d.runs ?? [{ taskId: d.taskId, run: d.run }]);
+      else if (d.kind === "occ") onSetDays(d.taskId, replaceDays(daysOf(d.taskId), [d.day], []));
       return;
     }
     if (!over.startsWith("day:")) return;
-    const target = targetDays(d, over.slice(4));
-    const remove = d.kind === "run" && !copyRef.current ? d.run : [];
-    onSetDays(d.taskId, replaceDays(days, remove, target));
+    const day = over.slice(4);
+    if (d.kind === "task") {
+      for (const id of d.taskIds ?? [d.taskId]) onSetDays(id, replaceDays(daysOf(id), [], [day]));
+      return;
+    }
+    if (d.kind === "occ") {
+      if (day !== d.day)
+        onSetDays(d.taskId, replaceDays(daysOf(d.taskId), keep ? [] : [d.day], [day]));
+      return;
+    }
+    const delta = diffDays(day, d.grabDay ?? d.run[0]!);
+    if (delta === 0) return;
+    const runs = d.runs ?? [{ taskId: d.taskId, run: d.run }];
+    moveRuns(runs, delta, keep);
+    // Lo seleccionado sigue seleccionado en su nuevo sitio.
+    if (!keep)
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const r of runs)
+          if (next.delete(runKey(r.taskId, r.run[0]!)))
+            next.add(runKey(r.taskId, addDays(r.run[0]!, delta)));
+        return next;
+      });
   }
 
   const preview = useMemo(() => {
     if (!drag || !overId?.startsWith("day:")) return null;
     return new Set(targetDays(drag, overId.slice(4)));
   }, [drag, overId]);
+
+  // Las barras que se van de su sitio se atenúan mientras se arrastran.
+  const movingKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (!drag || copy || drag.kind !== "run") return keys;
+    for (const r of drag.runs ?? [{ taskId: drag.taskId, run: drag.run }])
+      keys.add(runKey(r.taskId, r.run[0]!));
+    return keys;
+  }, [drag, copy]);
+  const movingChips = useMemo(
+    () => new Set(drag?.kind === "task" ? (drag.taskIds ?? [drag.taskId]) : []),
+    [drag],
+  );
 
   /* ------------------------------- Estirar ------------------------------- */
   // Los bordes de una barra se estiran a otros días como en cualquier
@@ -318,19 +538,19 @@ export function CalendarPage({
       swallowClick();
       setResize(null);
     };
-    const onKey = (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       onSetDays(resize.taskId, resize.base);
       setResize(null);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKeyDown);
     document.body.style.cursor = "ew-resize";
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKeyDown);
       document.body.style.cursor = "";
     };
   }, [resize, onSetDays]);
@@ -338,15 +558,17 @@ export function CalendarPage({
   const openTask = (id: string) => {
     if (!justDragged.current) onOpenTask(id);
   };
-  const removeRun = (taskId: string, run: IsoDay[]) => {
-    const days = byId.get(taskId)?.task.days ?? [];
-    onSetDays(taskId, replaceDays(days, run, []));
-  };
 
   const activeItem = drag ? byId.get(drag.taskId) : undefined;
+  const groupSize = drag ? (drag.runs?.length ?? drag.taskIds?.length ?? 1) : 1;
 
   return (
-    <div className="select-none" onClick={(e) => e.stopPropagation()}>
+    <div
+      ref={rootRef}
+      className="select-none"
+      onMouseDown={handleMouseDown}
+      onClick={(e) => e.stopPropagation()}
+    >
       <DndContext
         sensors={sensors}
         collisionDetection={pointerWithin}
@@ -360,7 +582,8 @@ export function CalendarPage({
             <button
               type="button"
               onClick={() => shift(-1)}
-              aria-label={view === "month" ? "Mes anterior" : "Semana anterior"}
+              aria-label="Anterior"
+              title="Anterior (←)"
               className="grid size-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
               <ChevronLeft className="size-4" />
@@ -376,14 +599,25 @@ export function CalendarPage({
             <button
               type="button"
               onClick={() => shift(1)}
-              aria-label={view === "month" ? "Mes siguiente" : "Semana siguiente"}
+              aria-label="Siguiente"
+              title="Siguiente (→)"
               className="grid size-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
               <ChevronRight className="size-4" />
             </button>
           </div>
           <h2 className="min-w-48 text-lg font-semibold tracking-tight text-foreground">
-            {view === "month" ? monthLabel(anchor) : weekLabel(weeks[0]!)}
+            {view === "month"
+              ? monthLabel(anchor)
+              : view === "week"
+                ? weekLabel(weeks[0]!)
+                : cap(
+                    anchorDate.toLocaleDateString("es", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    }),
+                  )}
           </h2>
           <div
             role="radiogroup"
@@ -394,6 +628,7 @@ export function CalendarPage({
               [
                 ["month", "Mes"],
                 ["week", "Semana"],
+                ["day", "Día"],
               ] as const
             ).map(([v, label]) => (
               <button
@@ -413,56 +648,90 @@ export function CalendarPage({
               </button>
             ))}
           </div>
-          <p className="ml-auto hidden text-[11px] text-muted-foreground lg:block">
-            Arrastra una tarea a un día · estira la barra por sus bordes · Ctrl al soltar la copia ·
-            suéltala abajo para quitarla
+          {selected.size > 0 && view !== "day" && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 py-0.5 pr-1 pl-2.5 text-xs font-medium text-primary">
+              {selected.size} seleccionada(s)
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                aria-label="Quitar selección"
+                className="grid size-4 place-items-center rounded-full hover:bg-primary/20"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
+          <p className="ml-auto hidden max-w-[46rem] text-right text-[11px] text-muted-foreground lg:block">
+            {HINTS[view]}
           </p>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-border bg-card/40">
-          {view === "month" && (
-            <div className="grid grid-cols-7 border-b border-border bg-card/60">
-              {WEEKDAYS.map((d) => (
-                <div
-                  key={d}
-                  className="px-2 py-1.5 text-[10px] font-medium tracking-wide text-muted-foreground uppercase"
-                >
-                  {d}
-                </div>
-              ))}
-            </div>
-          )}
-          {weeks.map((week) => (
-            <WeekRow
-              key={week[0]}
-              week={week}
-              view={view}
-              month={anchorDate.getMonth()}
-              today={today}
-              items={scheduled}
-              rowPx={rowPx}
-              laneCap={laneCap}
-              preview={preview}
-              draggingTaskId={drag && !copy ? drag.taskId : null}
-              draggingRun={drag?.kind === "run" && !copy ? drag.run : null}
-              customTypes={customTypes}
-              onOpen={openTask}
-              onToggleDone={onToggleDone}
-              onRemove={removeRun}
-              onResizeStart={startResize}
-              onShowWeek={(day) => {
-                changeView("week");
-                setAnchor(day);
-              }}
-            />
-          ))}
-        </div>
+        {view === "day" ? (
+          <DayView
+            day={anchor}
+            today={today}
+            items={items}
+            customTypes={customTypes}
+            preview={preview}
+            draggingTaskId={drag?.kind === "occ" && !copy ? drag.taskId : null}
+            onGoto={setAnchor}
+            onOpenTask={openTask}
+            onToggleDone={onToggleDone}
+            onStartPomodoro={onStartPomodoro}
+            onSetDays={onSetDays}
+          />
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-border bg-card/40">
+            {view === "month" && (
+              <div className="grid grid-cols-7 border-b border-border bg-card/60">
+                {WEEKDAYS.map((d) => (
+                  <div
+                    key={d}
+                    className="px-2 py-1.5 text-[10px] font-medium tracking-wide text-muted-foreground uppercase"
+                  >
+                    {d}
+                  </div>
+                ))}
+              </div>
+            )}
+            {weeks.map((week) => (
+              <WeekRow
+                key={week[0]}
+                week={week}
+                view={grid}
+                month={anchorDate.getMonth()}
+                today={today}
+                focusDay={view === "week" ? anchor : null}
+                items={scheduled}
+                rowPx={rowPx}
+                laneCap={laneCap}
+                preview={preview}
+                selected={selected}
+                movingKeys={movingKeys}
+                customTypes={customTypes}
+                onSelect={selectClick}
+                onOpen={openTask}
+                onOpenDay={openDay}
+                onToggleDone={onToggleDone}
+                onRemove={(taskId, run) => removeRuns([{ taskId, run }])}
+                onResizeStart={startResize}
+                onShowWeek={(day) => {
+                  setAnchor(day);
+                  changeView("week");
+                }}
+              />
+            ))}
+          </div>
+        )}
 
         <Pool
           items={items}
           today={today}
           customTypes={customTypes}
           drag={drag}
+          selected={selected}
+          moving={movingChips}
+          onSelect={selectClick}
           onOpen={openTask}
           onToggleDone={onToggleDone}
         />
@@ -471,21 +740,42 @@ export function CalendarPage({
           {drag && activeItem ? (
             <div
               className="relative cursor-grabbing"
-              style={drag.width ? { width: drag.width } : undefined}
+              style={drag.kind === "run" && drag.width ? { width: drag.width } : undefined}
             >
-              {drag.kind === "run" ? (
-                <BarBody
-                  item={activeItem}
-                  customTypes={customTypes}
-                  height={sizes.lane}
-                  detailed={view === "week"}
-                  lifted
-                />
-              ) : (
-                <ChipBody item={activeItem} today={today} customTypes={customTypes} lifted />
+              {/* El resto del grupo viaja apilado debajo, como en el tablero. */}
+              {Array.from({ length: Math.min(groupSize - 1, 3) }, (_, i) => i + 1)
+                .reverse()
+                .map((depth) => (
+                  <div
+                    key={depth}
+                    aria-hidden
+                    className="absolute inset-0 rounded-md border border-primary/40 bg-card"
+                    style={{
+                      transform: `translate(${depth * 4}px, ${depth * 4}px)`,
+                      opacity: 1 - depth * 0.2,
+                    }}
+                  />
+                ))}
+              <div className="relative">
+                {drag.kind === "run" ? (
+                  <BarBody
+                    item={activeItem}
+                    customTypes={customTypes}
+                    height={sizes.lane}
+                    detailed={view === "week"}
+                    lifted
+                  />
+                ) : (
+                  <ChipBody item={activeItem} today={today} customTypes={customTypes} lifted />
+                )}
+              </div>
+              {groupSize > 1 && (
+                <span className="absolute -top-2 -left-2 z-10 grid size-5 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground shadow">
+                  {groupSize}
+                </span>
               )}
-              {copy && drag.kind === "run" && (
-                <span className="absolute -top-2.5 -right-2 inline-flex items-center gap-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground shadow">
+              {copy && drag.kind !== "task" && (
+                <span className="absolute -top-2.5 -right-2 z-10 inline-flex items-center gap-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground shadow">
                   <Copy className="size-2.5" /> Copiar
                 </span>
               )}
@@ -493,50 +783,72 @@ export function CalendarPage({
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      {marquee && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed z-40 rounded-sm border border-primary/60 bg-primary/10"
+          style={{
+            left: marquee.left,
+            top: marquee.top,
+            width: marquee.right - marquee.left,
+            height: marquee.bottom - marquee.top,
+          }}
+        />
+      )}
     </div>
   );
 }
 
 /* --------------------------------- Semana -------------------------------- */
 
+type ResizeStart = (
+  e: React.PointerEvent,
+  taskId: string,
+  run: IsoDay[],
+  edge: Resize["edge"],
+) => void;
+
 function WeekRow({
   week,
   view,
   month,
   today,
+  focusDay,
   items,
   rowPx,
   laneCap,
   preview,
-  draggingTaskId,
-  draggingRun,
+  selected,
+  movingKeys,
   customTypes,
+  onSelect,
   onOpen,
+  onOpenDay,
   onToggleDone,
   onRemove,
   onResizeStart,
   onShowWeek,
 }: {
   week: IsoDay[];
-  view: View;
+  view: "month" | "week";
   month: number;
   today: IsoDay;
+  /** El día enfocado de la semana: más ancho y con acceso a su vista de día. */
+  focusDay: IsoDay | null;
   items: Item[];
   rowPx: number;
   laneCap: number;
   preview: Set<IsoDay> | null;
-  draggingTaskId: string | null;
-  draggingRun: IsoDay[] | null;
+  selected: Set<string>;
+  movingKeys: Set<string>;
   customTypes: CustomType[];
+  onSelect: (key: string, e: React.MouseEvent) => void;
   onOpen: (id: string) => void;
+  onOpenDay: (day: IsoDay) => void;
   onToggleDone: (id: string) => void;
   onRemove: (taskId: string, run: IsoDay[]) => void;
-  onResizeStart: (
-    e: React.PointerEvent,
-    taskId: string,
-    run: IsoDay[],
-    edge: Resize["edge"],
-  ) => void;
+  onResizeStart: ResizeStart;
   onShowWeek: (day: IsoDay) => void;
 }) {
   const sizes = SIZES[view];
@@ -564,12 +876,14 @@ function WeekRow({
       ref={rowRef}
       className="relative grid grid-cols-7 border-b border-border last:border-b-0"
       style={{
-        // En la semana, hoy se ensancha para leer mejor sus tareas.
-        ...(view === "week" && week.includes(today)
+        // En la semana, el día enfocado se ensancha (con transición) para leer
+        // mejor sus tareas.
+        ...(focusDay && week.includes(focusDay)
           ? {
               gridTemplateColumns: week
-                .map((d) => `minmax(0, ${d === today ? TODAY_SPAN : 1}fr)`)
+                .map((d) => `minmax(0, ${d === focusDay ? FOCUS_SPAN : 1}fr)`)
                 .join(" "),
+              transition: "grid-template-columns 320ms cubic-bezier(0.2, 0.8, 0.2, 1)",
             }
           : {}),
         gridTemplateRows: `${sizes.head}px repeat(${shown}, ${sizes.lane}px) minmax(${sizes.more}px, 1fr)`,
@@ -585,28 +899,34 @@ function WeekRow({
           view={view}
           outside={view === "month" && fromIso(day).getMonth() !== month}
           isToday={day === today}
+          focused={day === focusDay}
           highlighted={preview?.has(day) ?? false}
+          onOpenDay={onOpenDay}
         />
       ))}
 
       {segments
         .filter((s) => s.lane < laneCap)
-        .map((s) => (
-          <RunBar
-            key={`${s.item.task.id}:${s.run[0]}`}
-            seg={s}
-            week={week}
-            view={view}
-            customTypes={customTypes}
-            dimmed={
-              draggingTaskId === s.item.task.id && !!draggingRun && draggingRun[0] === s.run[0]
-            }
-            onOpen={onOpen}
-            onToggleDone={onToggleDone}
-            onRemove={onRemove}
-            onResizeStart={onResizeStart}
-          />
-        ))}
+        .map((s) => {
+          const key = runKey(s.item.task.id, s.run[0]!);
+          return (
+            <RunBar
+              key={`${s.item.task.id}:${s.run[0]}`}
+              seg={s}
+              selKey={key}
+              week={week}
+              view={view}
+              customTypes={customTypes}
+              selected={selected.has(key)}
+              dimmed={movingKeys.has(key)}
+              onSelect={onSelect}
+              onOpen={onOpen}
+              onToggleDone={onToggleDone}
+              onRemove={onRemove}
+              onResizeStart={onResizeStart}
+            />
+          );
+        })}
 
       {hiddenPerDay.map((hidden, c) =>
         hidden.length > 0 ? (
@@ -724,18 +1044,32 @@ function DayCell({
   view,
   outside,
   isToday,
+  focused,
   highlighted,
+  onOpenDay,
 }: {
   day: IsoDay;
   col: number;
-  view: View;
+  view: "month" | "week";
   outside: boolean;
   isToday: boolean;
+  focused: boolean;
   highlighted: boolean;
+  onOpenDay: (day: IsoDay) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day:${day}` });
   const date = fromIso(day);
   const weekend = col >= 5;
+  const number = (
+    <span
+      className={cn(
+        "inline-grid h-6 min-w-6 place-items-center rounded-full px-1 text-sm font-semibold tabular-nums transition-colors",
+        isToday ? "bg-primary text-primary-foreground" : "text-foreground",
+      )}
+    >
+      {date.getDate()}
+    </span>
+  );
   return (
     <div
       ref={setNodeRef}
@@ -744,9 +1078,10 @@ function DayCell({
       className={cn(
         "px-2 pt-1.5 transition-colors",
         col < 6 && "border-r border-border",
+        view === "month" ? "cursor-zoom-in" : !focused && "cursor-pointer",
         weekend && "bg-background/40",
         outside && "bg-background/70",
-        isToday && view === "week" && "bg-primary/[0.04]",
+        focused && "bg-primary/[0.04]",
         (highlighted || isOver) && "bg-primary/10 shadow-[inset_0_0_0_1px_var(--primary)]",
       )}
     >
@@ -764,18 +1099,28 @@ function DayCell({
           {date.getDate()}
         </span>
       ) : (
-        <div className="flex items-baseline gap-1.5">
+        <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
             {WEEKDAYS[col]}
           </span>
-          <span
-            className={cn(
-              "inline-grid h-6 min-w-6 place-items-center rounded-full px-1 text-sm font-semibold tabular-nums",
-              isToday ? "bg-primary text-primary-foreground" : "text-foreground",
-            )}
-          >
-            {date.getDate()}
-          </span>
+          {focused ? (
+            // En el día enfocado, su número abre la vista de día.
+            <button
+              type="button"
+              onClick={() => onOpenDay(day)}
+              title="Ver este día"
+              className="group/day inline-flex items-center gap-1 rounded-full outline-none focus-visible:ring-1 focus-visible:ring-primary"
+            >
+              <span className="rounded-full ring-primary/60 transition-shadow group-hover/day:ring-2">
+                {number}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors group-hover/day:bg-secondary group-hover/day:text-foreground">
+                <Maximize2 className="size-3" /> Ver día
+              </span>
+            </button>
+          ) : (
+            number
+          )}
         </div>
       )}
     </div>
@@ -783,83 +1128,6 @@ function DayCell({
 }
 
 /* --------------------------------- Barras -------------------------------- */
-
-/** Casilla redonda en el color del tipo, como los estados de Linear: vacía es
- * Por hacer, media llena es En progreso y llena con ✓ es Hecha. Con `onToggle`
- * es un botón: un clic la marca como hecha (o la devuelve). */
-function StatusCheck({
-  col,
-  accent,
-  size = 13,
-  onToggle,
-}: {
-  col: ColumnId;
-  accent: string;
-  size?: number;
-  onToggle?: (() => void) | undefined;
-}) {
-  const done = col === "done";
-  const style: CSSProperties = {
-    width: size,
-    height: size,
-    boxShadow: `inset 0 0 0 1.5px ${accent}`,
-    backgroundColor: done ? accent : "transparent",
-  };
-  const inner = (
-    <>
-      {col === "doing" && (
-        <span
-          aria-hidden
-          className="absolute inset-[2.5px] rounded-full"
-          style={{ background: `conic-gradient(${accent} 0 50%, transparent 50% 100%)` }}
-        />
-      )}
-      <Check
-        aria-hidden
-        strokeWidth={3.5}
-        className={cn(
-          "relative size-[72%] transition-[opacity,transform] duration-150",
-          done ? "scale-100 opacity-100" : "scale-50 opacity-0",
-          onToggle && !done && "group-hover/check:scale-100 group-hover/check:opacity-70",
-        )}
-        style={{ color: done ? "var(--background)" : accent }}
-      />
-    </>
-  );
-  const base =
-    "relative grid shrink-0 place-items-center rounded-full transition-[background-color,transform]";
-  if (!onToggle) {
-    return (
-      <span aria-hidden className={base} style={style}>
-        {inner}
-      </span>
-    );
-  }
-  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={done}
-      aria-label={done ? "Marcar como pendiente" : "Marcar como hecha"}
-      title={done ? "Hecha · clic para devolverla" : "Marcar como hecha"}
-      onPointerDown={stop}
-      onKeyDown={stop}
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle();
-      }}
-      className={cn(
-        base,
-        // Zona de clic más grande que el círculo.
-        "group/check cursor-pointer outline-none before:absolute before:-inset-1.5 before:content-[''] hover:scale-110 focus-visible:ring-1 focus-visible:ring-primary active:scale-95",
-      )}
-      style={style}
-    >
-      {inner}
-    </button>
-  );
-}
 
 function BarBody({
   item,
@@ -907,29 +1175,30 @@ function BarBody({
 
 function RunBar({
   seg,
+  selKey,
   week,
   view,
   customTypes,
+  selected,
   dimmed,
+  onSelect,
   onOpen,
   onToggleDone,
   onRemove,
   onResizeStart,
 }: {
   seg: WeekSegment<Item>;
+  selKey: string;
   week: IsoDay[];
-  view: View;
+  view: "month" | "week";
   customTypes: CustomType[];
+  selected: boolean;
   dimmed: boolean;
+  onSelect: (key: string, e: React.MouseEvent) => void;
   onOpen: (id: string) => void;
   onToggleDone: (id: string) => void;
   onRemove: (taskId: string, run: IsoDay[]) => void;
-  onResizeStart: (
-    e: React.PointerEvent,
-    taskId: string,
-    run: IsoDay[],
-    edge: Resize["edge"],
-  ) => void;
+  onResizeStart: ResizeStart;
 }) {
   const { task } = seg.item;
   const firstShown = week[seg.startCol]!;
@@ -959,17 +1228,20 @@ function RunBar({
       }}
       {...attributes}
       {...listeners}
-      title={`${task.title} · ${seg.run.length} día(s)`}
-      onClick={() => onOpen(task.id)}
+      data-sel-key={selKey}
+      title={`${task.title} · ${seg.run.length} día(s)\nClic selecciona · doble clic abre los detalles`}
+      onClick={(e) => onSelect(selKey, e)}
+      onDoubleClick={() => onOpen(task.id)}
       onKeyDown={(e) => e.key === "Enter" && onOpen(task.id)}
       style={{
         gridColumn: `${seg.startCol + 1} / ${seg.endCol + 2}`,
         gridRow: seg.lane + 2,
       }}
       className={cn(
-        "group relative z-10 min-w-0 cursor-grab outline-none focus-visible:ring-1 focus-visible:ring-primary active:cursor-grabbing",
+        "group relative z-10 min-w-0 cursor-grab rounded-md outline-none focus-visible:ring-1 focus-visible:ring-primary active:cursor-grabbing",
         seg.continuesBefore ? "ml-0" : "ml-1",
         seg.continuesAfter ? "mr-0" : "mr-1",
+        selected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
         dimmed && "opacity-35",
       )}
     >
@@ -1003,6 +1275,7 @@ function RunBar({
         aria-label="Quitar del calendario"
         title={seg.run.length > 1 ? `Quitar estos ${seg.run.length} días` : "Quitar este día"}
         onPointerDown={stop}
+        onDoubleClick={stop}
         onClick={(e) => {
           e.stopPropagation();
           onRemove(task.id, seg.run);
@@ -1057,27 +1330,36 @@ function PoolChip({
   item,
   today,
   customTypes,
+  selected,
+  dimmed,
+  onSelect,
   onOpen,
   onToggleDone,
 }: {
   item: Item;
   today: IsoDay;
   customTypes: CustomType[];
+  selected: boolean;
+  dimmed: boolean;
+  onSelect: (key: string, e: React.MouseEvent) => void;
   onOpen: (id: string) => void;
   onToggleDone: (id: string) => void;
 }) {
   const data: DragData = { kind: "task", taskId: item.task.id };
-  const { setNodeRef, attributes, listeners, isDragging } = useDraggable({
+  const { setNodeRef, attributes, listeners } = useDraggable({
     id: `task:${item.task.id}`,
     data,
   });
   const days = item.task.days ?? [];
+  const key = chipKey(item.task.id);
   return (
     <div
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      onClick={() => onOpen(item.task.id)}
+      data-sel-key={key}
+      onClick={(e) => onSelect(key, e)}
+      onDoubleClick={() => onOpen(item.task.id)}
       title={
         days.length
           ? `${item.task.title}\nPlanificada: ${days.map((d) => fromIso(d).toLocaleDateString("es", { weekday: "short", day: "numeric", month: "short" })).join(", ")}`
@@ -1085,7 +1367,8 @@ function PoolChip({
       }
       className={cn(
         "min-w-0 cursor-grab rounded-md outline-none focus-visible:ring-1 focus-visible:ring-primary active:cursor-grabbing",
-        isDragging && "opacity-35",
+        selected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
+        dimmed && "opacity-35",
       )}
     >
       <ChipBody
@@ -1103,6 +1386,9 @@ function Pool({
   today,
   customTypes,
   drag,
+  selected,
+  moving,
+  onSelect,
   onOpen,
   onToggleDone,
 }: {
@@ -1110,6 +1396,9 @@ function Pool({
   today: IsoDay;
   customTypes: CustomType[];
   drag: Drag | null;
+  selected: Set<string>;
+  moving: Set<string>;
+  onSelect: (key: string, e: React.MouseEvent) => void;
   onOpen: (id: string) => void;
   onToggleDone: (id: string) => void;
 }) {
@@ -1127,7 +1416,7 @@ function Pool({
       !(hidePlanned && plannedAhead(i.task, today)),
   );
   const unplanned = open.filter((i) => !plannedAhead(i.task, today)).length;
-  const removing = drag?.kind === "run";
+  const removing = drag?.kind === "run" || drag?.kind === "occ";
 
   const toggle = (c: ColumnId) =>
     setCols((prev) => {
@@ -1191,7 +1480,7 @@ function Pool({
       </div>
       {removing ? (
         <p className="grid h-14 place-items-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
-          Suelta aquí para quitar estos días del calendario
+          Suelta aquí para quitarlas del calendario
         </p>
       ) : (
         <div className="flex max-h-[7.5rem] flex-wrap gap-1.5 overflow-y-auto">
@@ -1201,6 +1490,9 @@ function Pool({
               item={i}
               today={today}
               customTypes={customTypes}
+              selected={selected.has(chipKey(i.task.id))}
+              dimmed={moving.has(i.task.id)}
+              onSelect={onSelect}
               onOpen={onOpen}
               onToggleDone={onToggleDone}
             />

@@ -44,6 +44,8 @@ export type DayStat = {
   count: number;
   started: number;
   done: number;
+  /** Reparto de esos movimientos por tipo de tarea (para mezclar sus colores). */
+  types: { id: string; count: number }[];
 };
 
 export type Calendar = {
@@ -54,6 +56,9 @@ export type Calendar = {
   totalActive: number;
 };
 
+/** El calendario de actividad de un solo tipo, con su propia escala. */
+export type TypeCalendar = { id: string; label: string } & Calendar;
+
 export type BoardStats = {
   total: number;
   done: number;
@@ -63,6 +68,8 @@ export type BoardStats = {
   speeds: SpeedStat[];
   weeks: WeekStat[];
   calendar: Calendar;
+  /** Un calendario por tipo con actividad en el año, del más activo al menos. */
+  typeCalendars: TypeCalendar[];
   medianDays: number | null;
   /** Tareas hechas sin fecha utilizable (no cuentan para la velocidad). */
   untimed: number;
@@ -172,19 +179,25 @@ export function computeStats(board: BoardState, weeksBack = 8): BoardStats {
   }
 
   // Calendario de actividad del último año: cada movimiento a "En Progreso"
-  // o a "Hecho" cuenta como actividad de ese día.
-  const perDay = new Map<number, { started: number; done: number }>();
+  // o a "Hecho" cuenta como actividad de ese día, por tipo de tarea.
+  type Tally = { started: number; done: number };
+  const perDay = new Map<number, Map<string, Tally>>();
+  const labels = new Map<string, string>();
   for (const col of COLUMNS) {
     for (const task of board[col.id]) {
+      const { id: typeId, label } = typeOf(task);
+      labels.set(typeId, label);
       for (const ev of task.history ?? []) {
         if (ev.to !== "doing" && ev.to !== "done") continue;
         const day = new Date(ev.at);
         day.setHours(0, 0, 0, 0);
         const key = day.getTime();
-        const entry = perDay.get(key) ?? { started: 0, done: 0 };
+        const byType = perDay.get(key) ?? new Map<string, Tally>();
+        const entry = byType.get(typeId) ?? { started: 0, done: 0 };
         if (ev.to === "doing") entry.started += 1;
         else entry.done += 1;
-        perDay.set(key, entry);
+        byType.set(typeId, entry);
+        perDay.set(key, byType);
       }
     }
   }
@@ -195,26 +208,46 @@ export function computeStats(board: BoardState, weeksBack = 8): BoardStats {
   const firstDay = new Date(today.getTime() - 363 * DAY);
   firstDay.setDate(firstDay.getDate() - firstDay.getDay());
 
-  const days: DayStat[] = [];
-  for (let d = firstDay.getTime(); d <= today.getTime(); d += DAY) {
-    const entry = perDay.get(d) ?? { started: 0, done: 0 };
-    days.push({
-      date: d,
-      started: entry.started,
-      done: entry.done,
-      count: entry.started + entry.done,
-    });
-  }
+  // Recorre los días con setDate (no sumando 24 h) para no descuadrarse con
+  // los cambios de horario.
+  const dayKeys: number[] = [];
+  for (const d = new Date(firstDay); d.getTime() <= today.getTime(); d.setDate(d.getDate() + 1))
+    dayKeys.push(d.getTime());
 
-  const active = days.filter((d) => d.count > 0);
-  const max = active.reduce((m, d) => Math.max(m, d.count), 0);
-  // Cortes relativos: en un tablero tranquilo 2 tareas ya es un día fuerte.
-  const q = (p: number) => {
-    if (active.length === 0) return 1;
-    const sorted = active.map((d) => d.count).sort((a, b) => a - b);
-    return Math.max(1, sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]!);
-  };
-  const thresholds: [number, number, number, number] = [1, q(0.5), q(0.8), q(0.95)];
+  const days: DayStat[] = dayKeys.map((date) => {
+    const byType = perDay.get(date);
+    let started = 0;
+    let done = 0;
+    const types: DayStat["types"] = [];
+    for (const [id, t] of byType ?? []) {
+      started += t.started;
+      done += t.done;
+      types.push({ id, count: t.started + t.done });
+    }
+    return { date, started, done, count: started + done, types };
+  });
+  const calendar = calendarOf(days);
+
+  // Uno por tipo, cada uno con su propia escala para que se vea su ritmo
+  // aunque sea un tipo de pocas tareas.
+  const typeCalendars: TypeCalendar[] = [...labels.entries()]
+    .map(([id, label]) => {
+      const own = days.map((d) => {
+        const t = perDay.get(d.date)?.get(id) ?? { started: 0, done: 0 };
+        return {
+          date: d.date,
+          started: t.started,
+          done: t.done,
+          count: t.started + t.done,
+          types: t.started + t.done ? [{ id, count: t.started + t.done }] : [],
+        };
+      });
+      return { id, label, ...calendarOf(own) };
+    })
+    .filter((c) => c.totalActive > 0)
+    .sort(
+      (a, b) => b.days.reduce((s, d) => s + d.count, 0) - a.days.reduce((s, d) => s + d.count, 0),
+    );
 
   const doneCount = board.done.length;
   return {
@@ -225,10 +258,24 @@ export function computeStats(board: BoardState, weeksBack = 8): BoardStats {
     doneTasks: doneTasks.sort((a, b) => a.days - b.days),
     speeds,
     weeks,
-    calendar: { days, thresholds, max, totalActive: active.length },
+    calendar,
+    typeCalendars,
     medianDays: doneTasks.length ? median(doneTasks.map((t) => t.days)) : null,
     untimed,
   };
+}
+
+/** Cortes de intensidad relativos a tu propio ritmo: en un tablero tranquilo
+ * 2 tareas ya es un día fuerte. */
+function calendarOf(days: DayStat[]): Calendar {
+  const active = days.filter((d) => d.count > 0);
+  const max = active.reduce((m, d) => Math.max(m, d.count), 0);
+  const sorted = active.map((d) => d.count).sort((a, b) => a - b);
+  const q = (p: number) =>
+    sorted.length === 0
+      ? 1
+      : Math.max(1, sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]!);
+  return { days, thresholds: [1, q(0.5), q(0.8), q(0.95)], max, totalActive: active.length };
 }
 
 export function formatDays(days: number): string {

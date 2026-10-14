@@ -18,7 +18,7 @@ import { computeStats, formatDays, type BoardStats } from "@/lib/task-stats";
 import { computeFocus, formatMinutes, pacePoints, smartMatrix } from "@/lib/focus-stats";
 import { listSessions, type PomodoroSession } from "@/lib/pomodoro-cloud";
 import { objectiveProgress, useOkrs, type Objective } from "@/lib/okrs";
-import { ActivityCalendar } from "./ActivityCalendar";
+import { ActivityHeatmaps } from "./ActivityCalendar";
 import { JuiceTubes } from "./JuiceTubes";
 import { FocusByType, FocusPunchCard, TomatoTower } from "./FocusCharts";
 import { ObjectiveRings, PaceChart, SmartGrid } from "./OkrCharts";
@@ -257,9 +257,9 @@ export function StatsPage({ board }: { board: BoardState }) {
 
         <Panel
           title="Actividad del año"
-          hint="Un cuadro por día. Cuanto más fuerte el tono, más tareas pusiste en progreso o completaste ese día."
+          hint="Un cuadro por día: cuanto más fuerte, más tareas pusiste en progreso o completaste. Arriba todo junto, con los colores de los tipos del día mezclados; abajo cada tipo con su propia escala."
         >
-          <ActivityCalendar calendar={stats.calendar} />
+          <ActivityHeatmaps calendar={stats.calendar} typeCalendars={stats.typeCalendars} />
         </Panel>
 
         <div className="grid gap-4 lg:grid-cols-2">
