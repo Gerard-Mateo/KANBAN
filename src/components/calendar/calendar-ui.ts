@@ -2,7 +2,7 @@
 import type { CSSProperties } from "react";
 import { tagsForTask, type ColumnId, type Task } from "@/lib/kanban-data";
 import { chipCss, colorOf, dotCss, type CustomType } from "@/lib/custom-types";
-import { diffDays, fromIso, type IsoDay } from "@/lib/calendar";
+import { diffDays, fromIso, toIso, type IsoDay } from "@/lib/calendar";
 
 export type Item = { task: Task; col: ColumnId };
 
@@ -100,4 +100,22 @@ export function dayList(items: Item[], day: IsoDay): Item[] {
       );
     })
     .map(({ it }) => it);
+}
+
+/** Ámbar de "hecha, pero después del día planificado". */
+export const LATE_FILL = "oklch(0.78 0.14 80)";
+
+/** El día en que la tarea llegó a Hecho por última vez (null si no consta). */
+export function doneDayOf(task: Task): IsoDay | null {
+  const events = task.history ?? [];
+  for (let i = events.length - 1; i >= 0; i--)
+    if (events[i]!.to === "done") return toIso(new Date(events[i]!.at));
+  return null;
+}
+
+/** Hecha, pero en un día posterior a `day`: se prolongó y se terminó después. */
+export function doneLater(it: Item, day: IsoDay): boolean {
+  if (it.col !== "done") return false;
+  const doneDay = doneDayOf(it.task);
+  return !!doneDay && doneDay > day;
 }

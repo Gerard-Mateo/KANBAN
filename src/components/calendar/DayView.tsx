@@ -11,6 +11,9 @@ import { addDays, diffDays, fromIso, runContaining, weekOf, type IsoDay } from "
 import {
   barColors,
   dayList,
+  doneDayOf,
+  doneLater,
+  LATE_FILL,
   longDate,
   relativeDay,
   STATUS_LABEL,
@@ -98,6 +101,8 @@ export function DayView({
   const planned = dayList(items, day);
   const count = (c: ColumnId) => planned.filter((p) => p.col === c).length;
   const done = count("done");
+  // Hechas, pero días después de este: se prolongaron.
+  const late = planned.filter((p) => doneLater(p, day)).length;
   const total = planned.length;
   const left = total - done;
   const past = day < today;
@@ -119,7 +124,11 @@ export function DayView({
         ? "No había nada planificado este día."
         : "Día libre: arrastra tareas desde la lista de abajo para planificarlo."
       : left === 0
-        ? "Día completo: todo lo planificado está hecho."
+        ? late === 0
+          ? "Día completo: todo lo planificado está hecho."
+          : late === done
+            ? `Todo se terminó, pero después de este día.`
+            : `Todo hecho: ${done - late} ese día y ${late} después.`
         : past
           ? `Quedaron ${left} sin terminar de ${total}.`
           : `Te quedan ${left} de ${total}.`;
@@ -146,7 +155,7 @@ export function DayView({
             }}
           >
             <div className="flex flex-wrap items-center gap-6">
-              <DayRing planned={planned} bind={tip.bind} />
+              <DayRing planned={planned} day={day} bind={tip.bind} />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold tracking-wider text-primary uppercase">
                   {relativeDay(day, today)}
@@ -164,11 +173,25 @@ export function DayView({
                       >
                         <StatusCheck col={c} accent="currentColor" size={11} />
                         <span className="font-semibold text-foreground tabular-nums">
-                          {count(c)}
+                          {c === "done" ? done - late : count(c)}
                         </span>
                         {SUMMARY_LABEL[c]}
                       </span>
                     ))}
+                    {late > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px]"
+                        style={{
+                          borderColor: `color-mix(in oklch, ${LATE_FILL} 45%, transparent)`,
+                          color: LATE_FILL,
+                        }}
+                        title="Planificadas para este día pero terminadas días después"
+                      >
+                        <StatusCheck col="done" accent="currentColor" size={11} />
+                        <span className="font-semibold tabular-nums">{late}</span>
+                        hechas después
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -232,7 +255,7 @@ export function DayView({
             <DayPace day={day} today={today} planned={planned} bind={tip.bind} />
           </ChartCard>
           <ChartCard title="Por tipo" hint="Lo hecho de cada tipo en este día.">
-            <TypeProgress planned={planned} customTypes={customTypes} bind={tip.bind} />
+            <TypeProgress planned={planned} day={day} customTypes={customTypes} bind={tip.bind} />
           </ChartCard>
         </aside>
       </div>
@@ -298,6 +321,7 @@ function StripDay({
   });
   const total = items.length;
   const done = items.filter((i) => i.col === "done").length;
+  const late = items.filter((i) => doneLater(i, d)).length;
   return (
     <button
       ref={setNodeRef}
@@ -334,12 +358,19 @@ function StripDay({
         </span>
       </span>
       <span
-        className="h-1 w-full overflow-hidden rounded-full"
+        className="flex h-1 w-full overflow-hidden rounded-full"
         style={{ background: total ? PENDING_FILL : "transparent" }}
       >
         <span
-          className="block h-full rounded-full transition-[width] duration-500"
-          style={{ width: total ? `${(done / total) * 100}%` : 0, background: "var(--done)" }}
+          className="block h-full transition-[width] duration-500"
+          style={{
+            width: total ? `${((done - late) / total) * 100}%` : 0,
+            background: "var(--done)",
+          }}
+        />
+        <span
+          className="block h-full transition-[width] duration-500"
+          style={{ width: total ? `${(late / total) * 100}%` : 0, background: LATE_FILL }}
         />
       </span>
     </button>
@@ -348,8 +379,9 @@ function StripDay({
 
 /* --------------------------------- Anillo --------------------------------- */
 
-/** Un aro de neón que se llena con lo hecho del día (verde al completarlo). */
-function DayRing({ planned, bind }: { planned: Item[]; bind: Bind }) {
+/** Un aro de neón que se llena con lo hecho del día (verde si se completó ese
+ * mismo día); lo que se terminó días después sigue el arco en ámbar. */
+function DayRing({ planned, day, bind }: { planned: Item[]; day: IsoDay; bind: Bind }) {
   const glowId = `neon-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const size = 132;
   const r = 54;
@@ -358,14 +390,18 @@ function DayRing({ planned, bind }: { planned: Item[]; bind: Bind }) {
   const n = planned.length;
   const done = planned.filter((p) => p.col === "done").length;
   const doing = planned.filter((p) => p.col === "doing").length;
+  const late = planned.filter((p) => doneLater(p, day)).length;
+  const onTime = done - late;
   const pct = n ? Math.round((done / n) * 100) : 0;
-  const color = n > 0 && done === n ? "var(--done)" : "var(--primary)";
+  const color = n > 0 && onTime === n ? "var(--done)" : "var(--primary)";
   return (
     <div
       className="relative shrink-0"
       style={{ width: size, height: size }}
       {...bind(
-        n ? `${done} de ${n} hechas${doing ? ` · ${doing} en progreso` : ""}` : "Nada planificado",
+        n
+          ? `${done} de ${n} hechas${late ? ` (${late} después de este día)` : ""}${doing ? ` · ${doing} en progreso` : ""}`
+          : "Nada planificado",
       )}
     >
       <svg
@@ -398,7 +434,24 @@ function DayRing({ planned, bind }: { planned: Item[]; bind: Bind }) {
           opacity={0.12}
           style={{ transition: "stroke 500ms" }}
         />
-        {done > 0 && (
+        {late > 0 && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke={LATE_FILL}
+            strokeWidth={sw}
+            strokeLinecap="round"
+            strokeDasharray={`${(c * late) / n} ${c}`}
+            strokeDashoffset={-(c * onTime) / n}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+            filter={`url(#${glowId})`}
+            opacity={0.9}
+            style={{ transition: "stroke-dasharray 700ms, stroke-dashoffset 700ms" }}
+          />
+        )}
+        {onTime > 0 && (
           <circle
             cx={size / 2}
             cy={size / 2}
@@ -408,7 +461,7 @@ function DayRing({ planned, bind }: { planned: Item[]; bind: Bind }) {
             strokeWidth={sw}
             strokeLinecap="round"
             strokeDasharray={c}
-            strokeDashoffset={c * (1 - done / n)}
+            strokeDashoffset={c * (1 - onTime / n)}
             transform={`rotate(-90 ${size / 2} ${size / 2})`}
             filter={`url(#${glowId})`}
             style={{
@@ -424,6 +477,11 @@ function DayRing({ planned, bind }: { planned: Item[]; bind: Bind }) {
         <span className="text-[11px] text-muted-foreground">
           {n ? `${done} de ${n} hechas` : "sin tareas"}
         </span>
+        {late > 0 && (
+          <span className="text-[10px]" style={{ color: LATE_FILL }}>
+            {late} después
+          </span>
+        )}
       </div>
     </div>
   );
@@ -591,6 +649,14 @@ export function DayCardBody({
           {run.length > 1 && <RunDots run={run} day={day} accent={accent} />}
           {days.length > run.length && <span>{days.length} días en total</span>}
           {task.goal && <GoalMini goal={task.goal} accent={accent} />}
+          {doneLater(item, day) && (
+            <span style={{ color: LATE_FILL }}>
+              Hecha después ·{" "}
+              {fromIso(doneDayOf(task)!)
+                .toLocaleDateString("es", { weekday: "short", day: "numeric", month: "short" })
+                .replace(/[.,]/g, "")}
+            </span>
+          )}
         </div>
       </div>
       <div
@@ -762,7 +828,8 @@ function Legend({ items }: { items: { label: string; swatch: ReactNode }[] }) {
   );
 }
 
-/** Barras apiladas de la semana: hechas abajo (verde) y pendientes encima. */
+/** Barras apiladas de la semana: hechas ese día (verde), hechas días después
+ * (ámbar: se prolongaron) y pendientes encima. */
 function WeekBars({
   day,
   items,
@@ -777,7 +844,9 @@ function WeekBars({
   const week = weekOf(day);
   const stats = week.map((d) => {
     const p = items.filter((i) => i.task.days?.includes(d));
-    return { d, total: p.length, done: p.filter((i) => i.col === "done").length };
+    const done = p.filter((i) => i.col === "done").length;
+    const late = p.filter((i) => doneLater(i, d)).length;
+    return { d, total: p.length, done, late, onTime: done - late };
   });
   const max = Math.max(1, ...stats.map((s) => s.total));
   const H = 84;
@@ -798,7 +867,9 @@ function WeekBars({
               onClick={() => onGoto(s.d)}
               aria-label={`${label}: ${s.done} de ${s.total} hechas`}
               {...bind(
-                s.total ? `${label}\n${s.done} de ${s.total} hechas` : `${label}\nNada planificado`,
+                s.total
+                  ? `${label}\n${s.onTime} hechas ese día${s.late ? `\n${s.late} hechas después` : ""}\n${s.total - s.done} pendientes`
+                  : `${label}\nNada planificado`,
               )}
               className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1"
             >
@@ -815,15 +886,21 @@ function WeekBars({
                   "flex w-full max-w-7 flex-col justify-end overflow-hidden rounded-t-[4px] transition-[height] duration-500",
                   s.d === day && "ring-1 ring-primary ring-offset-2 ring-offset-card",
                 )}
-                style={{ height: h, gap: s.done && s.done < s.total ? 2 : 0 }}
+                style={{ height: h, gap: 2 }}
               >
                 {s.total === 0 ? (
                   <span className="h-full bg-border" />
                 ) : (
-                  <>
-                    <span style={{ flexGrow: s.total - s.done, background: PENDING_FILL }} />
-                    <span style={{ flexGrow: s.done, background: "var(--done)" }} />
-                  </>
+                  // Solo los tramos con algo, para que el hueco de 2 px no sobre.
+                  [
+                    { n: s.total - s.done, bg: PENDING_FILL },
+                    { n: s.late, bg: LATE_FILL },
+                    { n: s.onTime, bg: "var(--done)" },
+                  ]
+                    .filter((seg) => seg.n > 0)
+                    .map((seg) => (
+                      <span key={seg.bg} style={{ flexGrow: seg.n, background: seg.bg }} />
+                    ))
                 )}
               </span>
               <span
@@ -841,8 +918,12 @@ function WeekBars({
       <Legend
         items={[
           {
-            label: "Hechas",
+            label: "Hechas ese día",
             swatch: <span className="size-2 rounded-[2px]" style={{ background: "var(--done)" }} />,
+          },
+          {
+            label: "Hechas después",
+            swatch: <span className="size-2 rounded-[2px]" style={{ background: LATE_FILL }} />,
           },
           {
             label: "Pendientes",
@@ -1051,16 +1132,18 @@ function DayPace({
 
 function TypeProgress({
   planned,
+  day,
   customTypes,
   bind,
 }: {
   planned: Item[];
+  day: IsoDay;
   customTypes: CustomType[];
   bind: Bind;
 }) {
   const rows = new Map<
     string,
-    { label: string; accent: string; total: number; done: number; doing: number }
+    { label: string; accent: string; total: number; done: number; late: number; doing: number }
   >();
   for (const it of planned) {
     const { id, label } = typeOf(it.task);
@@ -1069,10 +1152,12 @@ function TypeProgress({
       accent: barColors(it.task, customTypes).accent,
       total: 0,
       done: 0,
+      late: 0,
       doing: 0,
     };
     row.total += 1;
     if (it.col === "done") row.done += 1;
+    if (doneLater(it, day)) row.late += 1;
     if (it.col === "doing") row.doing += 1;
     rows.set(id, row);
   }
@@ -1084,7 +1169,9 @@ function TypeProgress({
       {list.map((r) => (
         <div
           key={r.label}
-          {...bind(`${r.label}\n${r.done} hechas · ${r.doing} en progreso · ${r.total} en total`)}
+          {...bind(
+            `${r.label}\n${r.done - r.late} hechas ese día${r.late ? ` · ${r.late} después` : ""} · ${r.doing} en progreso · ${r.total} en total`,
+          )}
         >
           <div className="mb-1 flex items-center gap-1.5 text-xs">
             <span className="size-2 rounded-full" style={{ backgroundColor: r.accent }} />
@@ -1099,7 +1186,11 @@ function TypeProgress({
           >
             <span
               className="rounded-full transition-[width] duration-500"
-              style={{ width: `${(r.done / r.total) * 100}%`, background: r.accent }}
+              style={{ width: `${((r.done - r.late) / r.total) * 100}%`, background: r.accent }}
+            />
+            <span
+              className="rounded-full transition-[width] duration-500"
+              style={{ width: `${(r.late / r.total) * 100}%`, background: LATE_FILL }}
             />
             <span
               className="rounded-full transition-[width] duration-500"
