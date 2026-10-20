@@ -19,6 +19,13 @@ CREATE TABLE IF NOT EXISTS tasks (
   INDEX tasks_user_column_idx (user_id, column_id, position)
 );
 
+-- Espacio personal de cada cuenta: pendientes, regalos y apariencia (un JSON).
+CREATE TABLE IF NOT EXISTS personal_spaces (
+  user_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  data JSON NOT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+
 CREATE TABLE IF NOT EXISTS pomodoro_sessions (
   id CHAR(36) NOT NULL PRIMARY KEY,
   user_id VARCHAR(64) NOT NULL DEFAULT 'local',

@@ -31,6 +31,14 @@ async function migrate() {
   if (!have.has("redefinitions"))
     await pool.query("ALTER TABLE tasks ADD COLUMN redefinitions JSON NULL");
   if (!have.has("day_order")) await pool.query("ALTER TABLE tasks ADD COLUMN day_order JSON NULL");
+  // Espacio personal: una fila por cuenta (pendientes, regalos y apariencia).
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS personal_spaces (
+      user_id VARCHAR(64) NOT NULL PRIMARY KEY,
+      data JSON NOT NULL,
+      updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+    )`,
+  );
 }
 let migrated;
 const toDate = (v) => (v ? new Date(v) : null);
@@ -84,6 +92,19 @@ const routes = {
   },
   "PUT /tasks": async (body) => {
     await saveBoard(body.user_id, body.rows ?? []);
+    return { ok: true };
+  },
+  "GET /personal/:id": async (_body, userId) => {
+    const [rows] = await pool.query("SELECT data FROM personal_spaces WHERE user_id = ?", [
+      decodeURIComponent(userId),
+    ]);
+    return rows[0] ?? null;
+  },
+  "PUT /personal/:id": async (body, userId) => {
+    await pool.query(
+      "INSERT INTO personal_spaces (user_id, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)",
+      [decodeURIComponent(userId), JSON.stringify(body.data ?? {})],
+    );
     return { ok: true };
   },
   "GET /pomodoro": async () => {

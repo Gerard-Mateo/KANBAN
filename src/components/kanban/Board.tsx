@@ -58,6 +58,7 @@ import { PomodoroPage } from "@/components/pomodoro/PomodoroPage";
 import { OkrPage } from "@/components/okr/OkrPage";
 import { StatsPage } from "@/components/stats/StatsPage";
 import { CalendarPage } from "@/components/calendar/CalendarPage";
+import { PersonalPage } from "@/components/personal/PersonalPage";
 
 const STORAGE_KEY = "kanban-board-v1";
 const SHORTCUT_KEY = "kanban-ctrl-a-new-task";
@@ -125,7 +126,11 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
   const [renameOpen, setRenameOpen] = useState(false);
   const [bulkCreateCol, setBulkCreateCol] = useState<ColumnId | null>(null);
   const [bulkDetailsOpen, setBulkDetailsOpen] = useState(false);
-  const [tab, setTab] = useState<"board" | "calendar" | "pomodoro" | "okr" | "stats">("board");
+  const [tab, setTab] = useState<"board" | "calendar" | "pomodoro" | "okr" | "stats" | "personal">(
+    "board",
+  );
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   const [pomodoroTask, setPomodoroTask] = useState<string | undefined>(undefined);
   const [typeahead, setTypeahead] = useState("");
   const typeaheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -218,6 +223,12 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
       const tag = el?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
       e.preventDefault();
+      // En tu espacio personal el atajo apunta un pendiente tuyo, no una
+      // tarea del tablero de la empresa.
+      if (tabRef.current === "personal") {
+        window.dispatchEvent(new Event("personal:add"));
+        return;
+      }
       const id = handleAddTask("todo", "");
       setDetailsId(id);
     };
@@ -1159,6 +1170,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
     pomodoro: "Pomodoro",
     okr: "OKRs",
     stats: "Stats",
+    personal: "Personal",
   } as const;
 
   return (
@@ -1182,7 +1194,7 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
               className="flex items-center gap-0.5 rounded-lg bg-secondary p-0.5"
               onClick={(e) => e.stopPropagation()}
             >
-              {(["board", "calendar", "pomodoro", "okr", "stats"] as const).map((t) => (
+              {(["board", "calendar", "pomodoro", "okr", "stats", "personal"] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -1425,6 +1437,13 @@ export function Board({ userId, email }: { userId: string; email?: string | unde
         {tab === "stats" && (
           <div onClick={(e) => e.stopPropagation()}>
             <StatsPage board={board} />
+          </div>
+        )}
+
+        {/* Lo personal de cada cuenta: aparte del tablero compartido. */}
+        {tab === "personal" && (
+          <div onClick={(e) => e.stopPropagation()}>
+            <PersonalPage userId={userId} />
           </div>
         )}
       </main>
