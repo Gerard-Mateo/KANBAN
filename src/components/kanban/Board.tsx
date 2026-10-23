@@ -73,7 +73,12 @@ const EDGE = 60; // px desde el borde donde empieza el auto-scroll
 const MAX_SCROLL_SPEED = 18; // px por frame
 
 function logMove(task: Task, from: ColumnId | null, to: ColumnId): Task {
-  return { ...task, history: [...(task.history ?? []), { at: Date.now(), from, to }] };
+  // Llegar a Hecho da la meta por cumplida (5/10 → 10/10), venga de donde venga.
+  const goal =
+    to === "done" && task.goal && task.goal.current < task.goal.target
+      ? { goal: { ...task.goal, current: task.goal.target } }
+      : {};
+  return { ...task, ...goal, history: [...(task.history ?? []), { at: Date.now(), from, to }] };
 }
 
 /** La columna desde la que la tarea llegó a Hecho (Por Hacer si no se sabe). */
