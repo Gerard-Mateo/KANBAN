@@ -288,7 +288,7 @@ function WeekStrip({
           label={WEEKDAYS[i]!}
           current={d === day}
           isToday={d === today}
-          items={items.filter((it) => it.task.days?.includes(d))}
+          items={dayList(items, d)}
           highlighted={preview?.has(d) ?? false}
           onGoto={onGoto}
         />
@@ -554,6 +554,7 @@ function DayCard({
     measure: () => node.current?.getBoundingClientRect() ?? null,
   };
   const { setNodeRef, attributes, listeners, transform, transition } = useSortable({
+    disabled: !!item.unplanned,
     id: `occ:${task.id}`,
     data,
   });
@@ -649,6 +650,7 @@ export function DayCardBody({
           {run.length > 1 && <RunDots run={run} day={day} accent={accent} />}
           {days.length > run.length && <span>{days.length} días en total</span>}
           {task.goal && <GoalMini goal={task.goal} accent={accent} />}
+          {item.unplanned && <span>Hecha sin planificar</span>}
           {doneLater(item, day) && (
             <span style={{ color: LATE_FILL }}>
               Hecha después ·{" "}
@@ -678,17 +680,19 @@ export function DayCardBody({
             <Timer className="size-3.5" />
           </button>
         )}
-        <button
-          type="button"
-          title="Quitar de este día"
-          aria-label="Quitar de este día"
-          onPointerDown={stop}
-          onDoubleClick={stop}
-          onClick={() => onRemoveDay?.(task.id)}
-          className={action}
-        >
-          <X className="size-3.5" />
-        </button>
+        {!item.unplanned && (
+          <button
+            type="button"
+            title="Quitar de este día"
+            aria-label="Quitar de este día"
+            onPointerDown={stop}
+            onDoubleClick={stop}
+            onClick={() => onRemoveDay?.(task.id)}
+            className={action}
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -843,7 +847,7 @@ function WeekBars({
 }) {
   const week = weekOf(day);
   const stats = week.map((d) => {
-    const p = items.filter((i) => i.task.days?.includes(d));
+    const p = dayList(items, d);
     const done = p.filter((i) => i.col === "done").length;
     const late = p.filter((i) => doneLater(i, d)).length;
     return { d, total: p.length, done, late, onTime: done - late };

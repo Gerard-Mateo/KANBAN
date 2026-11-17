@@ -39,6 +39,7 @@ import {
   chipKey,
   dayAt,
   dayList,
+  doneUnplanned,
   edgeShadow,
   plannedAhead,
   runKey,
@@ -200,7 +201,14 @@ export function CalendarPage({
     [board],
   );
   const byId = useMemo(() => new Map(items.map((i) => [i.task.id, i])), [items]);
-  const scheduled = useMemo(() => items.filter((i) => i.task.days?.length), [items]);
+  // Lo planificado y, aparte, lo terminado un día que no estaba planificado.
+  const scheduled = useMemo(
+    () => [
+      ...items.filter((i) => i.task.days?.length),
+      ...items.filter((i) => doneUnplanned(i)).map((i) => ({ ...i, unplanned: true as const })),
+    ],
+    [items],
+  );
   const daysOf = (id: string) => byId.get(id)?.task.days ?? [];
 
   const anchorDate = fromIso(anchor);
@@ -923,7 +931,7 @@ function WeekRow({
   const sizes = SIZES[view];
   const { segments, lanes } = layoutWeek(
     items,
-    (i) => i.task.days,
+    (i) => (i.unplanned ? [doneUnplanned(i)!] : i.task.days),
     week,
     (i, day) => i.task.dayOrder?.[day] ?? Number.POSITIVE_INFINITY,
   );
@@ -1274,7 +1282,7 @@ function RunBar({
   onRemove: (taskId: string, run: IsoDay[]) => void;
   onResizeStart: ResizeStart;
 }) {
-  const { task } = seg.item;
+  const { task, unplanned } = seg.item;
   const firstShown = week[seg.startCol]!;
   const shownDays = seg.endCol - seg.startCol + 1;
   const node = useRef<HTMLDivElement | null>(null);
@@ -1286,9 +1294,11 @@ function RunBar({
     shownDays,
     measure: () => node.current?.getBoundingClientRect() ?? null,
   };
+  // Las hechas sin planificar solo se muestran: no se arrastran ni se estiran.
   const { setNodeRef, attributes, listeners } = useDraggable({
-    id: `run:${task.id}:${seg.run[0]}:${firstShown}`,
+    id: `${unplanned ? "done" : "run"}:${task.id}:${seg.run[0]}:${firstShown}`,
     data,
+    disabled: !!unplanned,
   });
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   const handle =
@@ -1302,9 +1312,13 @@ function RunBar({
       }}
       {...attributes}
       {...listeners}
-      data-sel-key={selKey}
-      title={`${task.title} · ${seg.run.length} día(s)\nClic selecciona · doble clic abre los detalles`}
-      onClick={(e) => onSelect(selKey, e)}
+      data-sel-key={unplanned ? undefined : selKey}
+      title={
+        unplanned
+          ? `${task.title}\nHecha este día sin estar planificada · doble clic abre los detalles`
+          : `${task.title} · ${seg.run.length} día(s)\nClic selecciona · doble clic abre los detalles`
+      }
+      onClick={(e) => !unplanned && onSelect(selKey, e)}
       onDoubleClick={() => onOpen(task.id)}
       onKeyDown={(e) => e.key === "Enter" && onOpen(task.id)}
       style={{
@@ -1312,7 +1326,10 @@ function RunBar({
         gridRow: seg.lane + 2,
       }}
       className={cn(
-        "group relative z-10 min-w-0 cursor-grab rounded-md outline-none focus-visible:ring-1 focus-visible:ring-primary active:cursor-grabbing",
+        "group relative z-10 min-w-0 rounded-md outline-none focus-visible:ring-1 focus-visible:ring-primary",
+        unplanned
+          ? "cursor-default opacity-80 outline-1 -outline-offset-1 outline-dashed outline-white/25"
+          : "cursor-grab active:cursor-grabbing",
         seg.continuesBefore ? "ml-0" : "ml-1",
         seg.continuesAfter ? "mr-0" : "mr-1",
         selected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
@@ -1328,7 +1345,7 @@ function RunBar({
         continuesAfter={seg.continuesAfter}
         onToggleDone={() => onToggleDone(task.id)}
       />
-      {!seg.continuesBefore && (
+      {!unplanned && !seg.continuesBefore && (
         <span
           aria-hidden
           className={cn(handle, "left-0")}
@@ -1336,7 +1353,7 @@ function RunBar({
           onClick={stop}
         />
       )}
-      {!seg.continuesAfter && (
+      {!unplanned && !seg.continuesAfter && (
         <span
           aria-hidden
           className={cn(handle, "right-0")}
@@ -1344,20 +1361,22 @@ function RunBar({
           onClick={stop}
         />
       )}
-      <button
-        type="button"
-        aria-label="Quitar del calendario"
-        title={seg.run.length > 1 ? `Quitar estos ${seg.run.length} días` : "Quitar este día"}
-        onPointerDown={stop}
-        onDoubleClick={stop}
-        onClick={(e) => {
-          e.stopPropagation();
-          onRemove(task.id, seg.run);
-        }}
-        className="absolute top-1/2 right-2.5 z-20 grid size-4 -translate-y-1/2 place-items-center rounded-full bg-background/80 text-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-background"
-      >
-        <X className="size-2.5" />
-      </button>
+      {!unplanned && (
+        <button
+          type="button"
+          aria-label="Quitar del calendario"
+          title={seg.run.length > 1 ? `Quitar estos ${seg.run.length} días` : "Quitar este día"}
+          onPointerDown={stop}
+          onDoubleClick={stop}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(task.id, seg.run);
+          }}
+          className="absolute top-1/2 right-2.5 z-20 grid size-4 -translate-y-1/2 place-items-center rounded-full bg-background/80 text-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-background"
+        >
+          <X className="size-2.5" />
+        </button>
+      )}
     </div>
   );
 }

@@ -4,7 +4,12 @@ import { tagsForTask, type ColumnId, type Task } from "@/lib/kanban-data";
 import { chipCss, colorOf, dotCss, type CustomType } from "@/lib/custom-types";
 import { diffDays, fromIso, toIso, type IsoDay } from "@/lib/calendar";
 
-export type Item = { task: Task; col: ColumnId };
+export type Item = {
+  task: Task;
+  col: ColumnId;
+  /** Se muestra ese día solo porque se terminó ese día, sin estar planificada. */
+  unplanned?: true | undefined;
+};
 
 export const WEEKDAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
@@ -89,7 +94,13 @@ export function dayList(items: Item[], day: IsoDay): Item[] {
   const rank = (it: Item) => it.task.dayOrder?.[day] ?? Number.POSITIVE_INFINITY;
   return items
     .map((it, i) => ({ it, i }))
-    .filter(({ it }) => it.task.days?.includes(day))
+    .flatMap(({ it, i }) =>
+      it.task.days?.includes(day)
+        ? [{ it, i }]
+        : doneUnplanned(it) === day
+          ? [{ it: { ...it, unplanned: true as const }, i }]
+          : [],
+    )
     .sort((a, b) => {
       const ra = rank(a.it);
       const rb = rank(b.it);
@@ -111,6 +122,14 @@ export function doneDayOf(task: Task): IsoDay | null {
   for (let i = events.length - 1; i >= 0; i--)
     if (events[i]!.to === "done") return toIso(new Date(events[i]!.at));
   return null;
+}
+
+/** El día en que se terminó una tarea hecha que no tenía ese día planificado
+ * (así lo que completaste sin planificar también aparece en el calendario). */
+export function doneUnplanned(it: Item): IsoDay | null {
+  if (it.col !== "done") return null;
+  const day = doneDayOf(it.task);
+  return day && !it.task.days?.includes(day) ? day : null;
 }
 
 /** Hecha, pero en un día posterior a `day`: se prolongó y se terminó después. */
