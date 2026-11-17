@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CalendarClock, Hash, Layers, History, Target, X } from "lucide-react";
+import { CalendarClock, Hash, Layers, History, Minus, Plus, Target, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBackdropClose } from "@/hooks/use-backdrop-close";
 import { useAllTypes } from "@/lib/custom-types";
@@ -262,6 +262,47 @@ function PastDefinitions({ list }: { list: Redefinition[] }) {
   );
 }
 
+/** Un número con − y + a los lados, como en la tarjeta del tablero. */
+function Stepper({
+  label,
+  onStep,
+  canDown,
+  canUp,
+  children,
+}: {
+  label: string;
+  onStep: (delta: 1 | -1) => void;
+  canDown: boolean;
+  canUp: boolean;
+  children: React.ReactNode;
+}) {
+  const btn =
+    "grid size-7 place-items-center rounded-full border border-border/60 text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-30 disabled:hover:border-border/60 disabled:hover:text-muted-foreground";
+  return (
+    <span className="inline-flex items-center gap-1">
+      <button
+        type="button"
+        aria-label={`Restar 1 (${label})`}
+        disabled={!canDown}
+        onClick={() => onStep(-1)}
+        className={btn}
+      >
+        <Minus className="size-3.5" />
+      </button>
+      {children}
+      <button
+        type="button"
+        aria-label={`Sumar 1 (${label})`}
+        disabled={!canUp}
+        onClick={() => onStep(1)}
+        className={btn}
+      >
+        <Plus className="size-3.5" />
+      </button>
+    </span>
+  );
+}
+
 /** Meta medible opcional: cuántas llevas de cuántas. */
 function GoalEditor({
   goal,
@@ -318,25 +359,39 @@ function GoalEditor({
       {label}
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <span>Llevo</span>
-        <input
-          type="number"
-          min={0}
-          max={goal.target}
-          value={goal.current}
-          onChange={(e) => set({ current: e.target.valueAsNumber })}
-          className={input}
-          aria-label="Avance actual"
-        />
+        <Stepper
+          label="avance"
+          onStep={(d) => set({ current: Math.min(goal.target, Math.max(0, goal.current + d)) })}
+          canDown={goal.current > 0}
+          canUp={goal.current < goal.target}
+        >
+          <input
+            type="number"
+            min={0}
+            max={goal.target}
+            value={goal.current}
+            onChange={(e) => set({ current: e.target.valueAsNumber })}
+            className={input}
+            aria-label="Avance actual"
+          />
+        </Stepper>
         <span>de</span>
-        <input
-          ref={targetRef}
-          type="number"
-          min={1}
-          value={goal.target}
-          onChange={(e) => set({ target: e.target.valueAsNumber })}
-          className={input}
-          aria-label="Meta"
-        />
+        <Stepper
+          label="meta"
+          onStep={(d) => set({ target: Math.max(1, goal.target + d) })}
+          canDown={goal.target > 1}
+          canUp
+        >
+          <input
+            ref={targetRef}
+            type="number"
+            min={1}
+            value={goal.target}
+            onChange={(e) => set({ target: e.target.valueAsNumber })}
+            className={input}
+            aria-label="Meta"
+          />
+        </Stepper>
         <button
           type="button"
           onClick={() => onChange(undefined)}
